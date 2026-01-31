@@ -1,4 +1,4 @@
-name: ARES V30 Absolute Overlord
+name: ARES V31 Total Dominance
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -25,37 +25,36 @@ jobs:
       - name: Telegram Handshake
         run: |
           curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-               -F text="🚀 [ARES V30] Overlord Online: ${{ github.repository }}" \
+               -F text="🚀 [ARES V31] Deep Hunt Online: ${{ github.repository }}" \
                "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
 
-      # 2. FRESH INSTALL: No cache. Downloads everything fresh for 100% stability.
+      # 2. FRESH INSTALL: Forces non-interactive mode to ensure all tools install
       - name: Install reconFTW
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && ./install.sh
+          # Forces the nuclei templates to update so the scanner doesn't complain
+          ./reconftw.sh --update
 
-      # 3. SURGICAL REMOVAL: Disables ONLY HTTP Probing while keeping ALL other tools active
-      - name: Optimize Engine (Remove Probing Only)
+      # 3. ENGINE OPTIMIZATION: Disables HTTP Probing
+      - name: Optimize Engine
         run: |
           cd reconftw/
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
 
-      # 4. THE DOUBLE-BRIDGE: Redirects locked root folders to authorized Home folder
+      # 4. THE FORCE BRIDGE: Maps all possible tool paths to the authorized home
       - name: Setup Force Bridge
         run: |
-          mkdir -p /home/runner/.cache /home/runner/.config /home/runner/.local /home/runner/go
-          # Bridge for the standard runner user
+          mkdir -p /home/runner/.cache /home/runner/.config /home/runner/.local /home/runner/go /home/runner/Tools
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
           sudo ln -sf /home/runner/go /go
-          # Bridge for the root user (In case tools switch context)
-          sudo mkdir -p /root
-          sudo ln -sf /home/runner/.cache /root/.cache
-          sudo ln -sf /home/runner/.config /root/.config
+          sudo ln -sf /home/runner/Tools /Tools
           sudo chmod -R 777 /home/runner
 
-      # 5. EXECUTION: Deep scan with full environment preservation
+      # 5. EXECUTION: Using absolute tool pathing to find the "Missing" tools
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
@@ -66,19 +65,18 @@ jobs:
           GOPATH: /home/runner/go
         run: |
           TARGET=$(cat targets.txt)
-          export PATH="$HOME/Tools:$HOME/go/bin:$PATH"
+          # Explicitly adding the /home/runner/Tools directory to the PATH
+          export PATH="/home/runner/Tools:/home/runner/go/bin:/usr/local/go/bin:$PATH"
           cd reconftw/
-          # -E preserves the ARES environment. --deep runs EVERY internal tool.
           sudo -E ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 6. MASTER ZIPPER: Fixed curl syntax for guaranteed Telegram delivery
+      # 6. MASTER ZIPPER: Reliable delivery
       - name: Pack & Send Master Report
         if: always() 
         run: |
           TARGET=$(cat targets.txt)
           if [ -d "reconftw/Recon/$TARGET" ]; then
             sudo zip -r "ARES_FINAL_REPORT.zip" "reconftw/Recon/$TARGET"
-            # Bulletproof upload using Form data (-F)
             curl -v -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                  -F document=@"ARES_FINAL_REPORT.zip" \
                  -F caption="✅ DONE: $TARGET" \
