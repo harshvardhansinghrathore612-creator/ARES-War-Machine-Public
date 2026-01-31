@@ -1,4 +1,4 @@
-name: ARES V33 Absolute Official
+name: ARES V34 Total War
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -25,37 +25,38 @@ jobs:
       - name: Telegram Handshake
         run: |
           curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-               -F text="🚀 [ARES V33] Official Suite Online: ${{ github.repository }}" \
+               -F text="🚀 [ARES V34] Starting Deep Injection Hunt: ${{ github.repository }}" \
                "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
 
-      # 2. OFFICIAL INSTALL: Uses the full, non-interactive official installer
+      # 2. FORCE INSTALL: Official installer with forced dependency check
       - name: Official Tool Installation
         run: |
           export DEBIAN_FRONTEND=noninteractive
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/
-          # This is the official command to install everything (tools + config)
           chmod +x install.sh
+          # Forces the installer to run without blocking
           ./install.sh
 
-      # 3. ENGINE OPTIMIZATION: Disables HTTP Probing to prevent hanging
+      # 3. ENGINE OPTIMIZATION: Disables HTTP Probing
       - name: Optimize Engine
         run: |
           cd reconftw/
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
 
-      # 4. THE FORCE BRIDGE: Maps all possible tool paths to the authorized home
-      - name: Setup Force Bridge
+      # 4. DEEP PATH INJECTION: Forcing tools into the system path
+      - name: Setup Force Environment
         run: |
           mkdir -p /home/runner/.cache /home/runner/.config /home/runner/.local /home/runner/go /home/runner/Tools
+          # Welding tool directories to system paths so they are NEVER "missing"
+          sudo ln -sf /home/runner/Tools/* /usr/local/bin/ || true
+          sudo ln -sf /home/runner/go/bin/* /usr/local/bin/ || true
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
-          sudo ln -sf /home/runner/go /go
-          sudo ln -sf /home/runner/Tools /Tools
           sudo chmod -R 777 /home/runner
 
-      # 5. EXECUTION: Official full scan command
+      # 5. EXECUTION: Using absolute PATH injection
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
@@ -66,10 +67,10 @@ jobs:
           GOPATH: /home/runner/go
         run: |
           TARGET=$(cat targets.txt)
-          # Ensuring official tool paths are in the system PATH
-          export PATH="/home/runner/Tools:/home/runner/go/bin:/usr/local/go/bin:$PATH"
+          # Injecting every possible tool location into the system PATH
+          export PATH="/home/runner/Tools:/home/runner/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
           cd reconftw/
-          # Using ONLY official flags that we know work
+          # -E preserves the injected PATH while running as root
           sudo -E ./reconftw.sh -d $TARGET -r -a -s --deep
           
       # 6. MASTER ZIPPER: Reliable delivery
@@ -85,7 +86,7 @@ jobs:
                  "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ Error: Scan for $TARGET failed. No results found." \
+                  -F text="❌ Error: Scan failed. Most tools are still missing. Check install logs." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
           
