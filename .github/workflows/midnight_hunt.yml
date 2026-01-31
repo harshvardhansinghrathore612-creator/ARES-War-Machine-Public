@@ -1,4 +1,4 @@
-name: ARES V45 Absolute Arsenal
+name: ARES V46 God-King
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK PURGE: Creates 30GB+ of room for the massive toolset
+      # 1. DISK PURGE: Shreds 30GB+ of junk for maximum scan room
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
@@ -25,16 +25,21 @@ jobs:
       - name: Telegram Handshake
         run: |
           curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-               -F text="🚀 [ARES V45] Starting Absolute Arsenal Force. Installing 94+ Tools..." \
+               -F text="🚀 [ARES V46] God-King Suite Online. Forcing 94+ Tools..." \
                "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
 
-      # 2. THE MASTER MANIFEST: Manually forcing every missing tool onto the disk
-      - name: Force Full Suite Install
+      # 2. THE NUCLEAR INSTALLER: Fixes "go not found" and installs all 94+ tools
+      - name: Force All Tools
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
+          # Fix Go environment first
+          sudo apt-get update && sudo apt-get install -y golang-go libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
           
           # MANIFEST: Official Go Tools Force
+          export GOPATH=$HOME/go
+          export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
+          
+          # Installing core ProjectDiscovery and other Go tools you listed
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
@@ -44,22 +49,22 @@ jobs:
           go install -v github.com/ffuf/ffuf/v2@latest
           go install -v github.com/hahwul/dalfox/v2@latest
           go install -v github.com/tomnomnom/assetfinder@latest
-          go install -v github.com/tomnomnom/waybackurls@latest
           go install -v github.com/tomnomnom/anew@latest
+          go install -v github.com/lc/gau/v2/cmd/gau@latest
           
           # MANIFEST: Pipx Tools (Arjun, Ghauri, Commix, etc.)
-          pipx install arjun && pipx install commix && pipx install ghauri && pipx install xnLinkFinder && pipx install dnsvalidator && pipx install wafw00f && pipx install urless
+          pipx install arjun && pipx install commix && pipx install ghauri && pipx install xnLinkFinder
           
-          # Run official installer for remaining 50+ tools and wordlists
+          # Clone official reconFTW for wordlists and remaining logic
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && chmod +x install.sh && ./install.sh
           
-          # WELDING: Link EVERY tool from Go, Pipx, and Tools to the system bin
-          sudo ln -sf /home/runner/go/bin/* /usr/local/bin/ || true
-          sudo ln -sf /home/runner/.local/bin/* /usr/local/bin/ || true
-          sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/local/bin/ \; || true
+          # WELDING: Link EVERY tool to system binary path
+          sudo ln -sf $HOME/go/bin/* /usr/local/bin/ || true
+          sudo ln -sf $HOME/.local/bin/* /usr/local/bin/ || true
+          sudo find $HOME/Tools -executable -type f -exec ln -sf {} /usr/local/bin/ \; || true
 
-      # 3. ULTIMATE BRIDGE: Fixes Permission Denied on locked folders
+      # 3. ULTIMATE BRIDGE: Fixes Permission Denied
       - name: Setup Force Bridge
         run: |
           mkdir -p /home/runner/.cache /home/runner/.config /home/runner/go /home/runner/Tools
@@ -67,7 +72,7 @@ jobs:
           sudo ln -sf /home/runner/.config /.config
           sudo chmod -R 777 /home/runner
 
-      # 4. EXECUTION: Absolute Path Dominance
+      # 4. EXECUTION: Total Path Dominance
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
@@ -81,7 +86,7 @@ jobs:
           export PATH="/home/runner/Tools:/home/runner/go/bin:/home/runner/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
           cd reconftw/
           
-          # Surgical Removal of HTTP Probing Only
+          # Force skip Probing modules
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
           
@@ -106,7 +111,7 @@ jobs:
             done
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ Error: Scan for $TARGET failed. Results folder not found." \
+                  -F text="❌ Error: Results folder empty for $TARGET." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
           
