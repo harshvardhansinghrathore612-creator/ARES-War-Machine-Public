@@ -1,4 +1,4 @@
-name: ARES V19 Supreme Overlord
+name: ARES V21 No-Compromise
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK PURGE: Clears ~30GB+ of junk for maximum hunt space
+      # 1. DISK PURGE: Shreds 30GB+ of junk so the scan has max room
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
@@ -25,55 +25,52 @@ jobs:
       - name: Telegram Handshake
         run: |
           curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-               -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 [ARES Supreme] Online: ${{ github.repository }}"
+               -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 [ARES V21] Starting Fresh Hunt: ${{ github.repository }}"
 
-      # 2. FRESH INSTALL: No cache. Downloads everything fresh for 100% stability.
+      # 2. FRESH INSTALL: Cache is 100% REMOVED. Tools download fresh every time.
       - name: Install reconFTW
         run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && ./install.sh
 
-      # 3. ENVIRONMENT ISOLATION: Forces all tools to stay in the authorized Home folder
-      - name: Setup Secure Environment
+      # 3. PERMISSION FORCE: Redirects the locked root /.cache to your safe Home folder
+      - name: Setup Environment
         run: |
-          mkdir -p $HOME/.cache
-          mkdir -p $HOME/.config
-          mkdir -p $HOME/.local/share
-          mkdir -p $HOME/go
-          chmod -R 777 $HOME
+          mkdir -p /home/runner/.cache
+          mkdir -p /home/runner/.config
+          mkdir -p /home/runner/go
+          # This symbolic link tricks tools into using your safe folder instead of root
+          sudo ln -s /home/runner/.cache /.cache
+          sudo chmod -R 777 /home/runner
 
-      # 4. EXECUTION: Using absolute Home mapping to kill the root /.cache error
+      # 4. EXECUTION: High-power scan with zero permission errors
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
-          # This overrides the tool's attempt to touch root folders
           HOME: /home/runner
           XDG_CACHE_HOME: /home/runner/.cache
-          XDG_CONFIG_HOME: /home/runner/.config
-          XDG_DATA_HOME: /home/runner/.local/share
           GOPATH: /home/runner/go
         run: |
           TARGET=$(cat targets.txt)
           export PATH="$HOME/Tools:$HOME/go/bin:$PATH"
           cd reconftw/
-          # No flags that cause syntax crashes
+          # No broken flags. Just the raw, deep scan command.
           ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 5. MASTER ZIPPER: Cleaned up to fix the malformed input error
+      # 5. MASTER ZIPPER: Guaranteed delivery of the report
       - name: Pack & Send Master Report
         if: always() 
         run: |
           TARGET=$(cat targets.txt)
           if [ -d "reconftw/Recon/$TARGET" ]; then
             zip -r "ARES_FINAL_REPORT.zip" "reconftw/Recon/$TARGET"
-            # Fixed the curl command to prevent malformed URL errors
             curl -F document=@"ARES_FINAL_REPORT.zip" \
                  "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&caption=✅ DONE: $TARGET"
           else
              curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-                  -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=❌ Error: No report folder found for $TARGET. Check logs."
+                  -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=❌ Error: Report folder not found for $TARGET."
           fi
           
