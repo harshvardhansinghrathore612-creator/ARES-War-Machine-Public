@@ -1,23 +1,27 @@
-name: ARES V7 Immortal Hunter
+name: ARES V8 Immortal Hunter
 on:
   schedule:
-    - cron: '0 0 * * *' 
-  workflow_dispatch: 
+    - cron: '0 0 * * *' # Midnight UTC Heartbeat
+  workflow_dispatch: # Manual "Attack" Button
 
 jobs:
   hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 
+    timeout-minutes: 360 # Hard GitHub Limit (6 Hours)
+    permissions: # Explicitly grants the script rights to save findings
+      contents: write
+      actions: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK CLEANER: Reclaims ~30GB+ automatically
+      # 1. DISK SHREDDER: Deletes ~30GB+ of junk for maximum scan room
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
           sudo apt-get clean
+          echo "Fresh Disk Space for Recon:"
           df -h /
 
       - name: Telegram Handshake
@@ -26,12 +30,13 @@ jobs:
           curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
                -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 [ARES HANDSHAKE] Account: $REPO is ONLINE."
 
+      # 2. CACHE: Saves 20 minutes by loading tools from your virtual storage
       - name: Cache reconFTW Tools
         id: cache-tools
         uses: actions/cache@v4
         with:
-          path: ~/Tools
-          key: ${{ runner.os }}-reconftw-v7
+          path: /home/runner/Tools
+          key: ${{ runner.os }}-reconftw-v8
 
       - name: Install reconFTW
         if: steps.cache-tools.outputs.cache-hit != 'true'
@@ -39,29 +44,33 @@ jobs:
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && ./install.sh
 
-      # 2. PERMISSION FIXER: Moves the cache to $HOME to bypass root locks
-      - name: Setup Writable Directories
+      # 3. IMMUNITY SHIELD: Redirects all "Permission Denied" errors to a writable zone
+      - name: Setup Writable Home
         run: |
-          mkdir -p $HOME/.cache
-          mkdir -p $HOME/.config
-          sudo chmod -R 777 $HOME/.cache
-          sudo chmod -R 777 $HOME/.config
+          mkdir -p /home/runner/.cache
+          mkdir -p /home/runner/.config
+          sudo chmod -R 777 /home/runner/.cache
+          sudo chmod -R 777 /home/runner/.config
 
+      # 4. THE SCAN: Full God Mode Execution
       - name: Execute Full Attack Suite
-        timeout-minutes: 330 
+        timeout-minutes: 330 # Safety Net: stops scan at 5h 30m to allow ZIP time
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }} 
-          # Forces tools to use the writable Home directory instead of root
-          XDG_CACHE_HOME: ${{ github.workspace }}/.cache 
+          # This forces all tools (Nuclei, Go, etc.) to bypass root permission locks
+          XDG_CACHE_HOME: /home/runner/.cache
+          HOME: /home/runner
         run: |
           TARGET=$(cat targets.txt)
           export GITHUB_TOKEN=${{ secrets.GIT_PAT }}
-          export PATH="$HOME/Tools:$PATH"
+          export PATH="/home/runner/Tools:$PATH"
           cd reconftw/
+          # -r: Recon | -a: Active Attacks | -s: Screenshots | --deep: Max Power
           ./reconftw.sh -d $TARGET -r -a -s --deep --notifications
           
+      # 5. THE ZIPPER: Sends the report even if the scan timed out
       - name: Pack & Send Master Report
         if: always() 
         env:
@@ -75,6 +84,6 @@ jobs:
                  "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT_ID&caption=✅ ARES REPORT: $TARGET"
           else
             curl -s "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
-                 -d "chat_id=$TG_CHAT_ID&text=❌ Error: No results folder found for $TARGET. Check logs."
+                 -d "chat_id=$TG_CHAT_ID&text=❌ Error: No results folder found for $TARGET. Check logs for tool errors."
           fi
           
