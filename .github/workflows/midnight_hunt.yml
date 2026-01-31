@@ -1,4 +1,4 @@
-name: ARES V47 Final Arsenal
+name: ARES V52 Last Chance
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,84 +16,73 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK PURGE: Shreds 30GB+ of junk
+      # 1. DISK PURGE: Max room for the 10GB+ official toolset
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
           sudo apt-get clean
 
-      - name: Telegram Handshake
+      # 2. PATH LOCKDOWN: Forces the system to remember tool locations globally
+      - name: Global Environment Lock
         run: |
-          curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-               -F text="🚀 [ARES V47] Arsenal Force Online. Installing 94+ Tools..." \
-               "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
+          echo "/home/runner/go/bin" >> $GITHUB_PATH
+          echo "/home/runner/.local/bin" >> $GITHUB_PATH
+          echo "/home/runner/Tools" >> $GITHUB_PATH
+          echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
 
-      # 2. THE NUCLEAR INSTALLER: Re-installs Go and forces all 94+ tools
-      - name: Force All Tools
+      # 3. OFFICIAL INSTALLER: Forced Non-Interactive Mode
+      - name: Official Installation
         run: |
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update && sudo apt-get install -y golang-go libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
-          
-          # MANIFEST: Official Go Tools
-          export GOPATH=$HOME/go
-          export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
-          
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-          go install -v github.com/projectdiscovery/katana/cmd/katana@latest
-          go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
-          
-          # MANIFEST: Pipx Tools (Arjun, Ghauri, Commix, etc.)
-          pipx install arjun && pipx install commix && pipx install ghauri && pipx install xnLinkFinder
-          
-          # Official installer for wordlists
           git clone --depth 1 https://github.com/six2dez/reconftw
-          cd reconftw/ && ./install.sh
-          
-          # WELDING: Physically move binaries to /usr/bin so the scanner CANNOT miss them
-          sudo cp $HOME/go/bin/* /usr/bin/ || true
-          sudo cp $HOME/.local/bin/* /usr/bin/ || true
-          sudo find $HOME/Tools -executable -type f -exec cp {} /usr/bin/ \; || true
+          cd reconftw/
+          chmod +x install.sh
+          # The 'yes' command bypasses all installer prompts
+          yes | ./install.sh --verbose
 
-      # 3. ULTIMATE BRIDGE: Fixes Permission Denied
-      - name: Setup Force Bridge
+      # 4. THE WELD: Hard-linking tools to /usr/bin so the scanner CANNOT miss them
+      - name: System Binary Weld
         run: |
-          mkdir -p /home/runner/.cache /home/runner/.config /home/runner/go /home/runner/Tools
+          sudo ln -sf /home/runner/go/bin/* /usr/bin/ || true
+          sudo ln -sf /home/runner/.local/bin/* /usr/bin/ || true
+          # Recurse into the Tools folder to find every hidden binary
+          sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/bin/ \; || true
+          
+          # Fix Permission Denied for Nuclei and others
+          mkdir -p /home/runner/.cache /home/runner/.config
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
           sudo chmod -R 777 /home/runner
 
-      # 4. EXECUTION: Total Path Dominance
+      # 5. EXECUTION: Official flow with Probing Disabled
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
           HOME: /home/runner
-          XDG_CACHE_HOME: /home/runner/.cache
-          XDG_CONFIG_HOME: /home/runner/.config
-          GOPATH: /home/runner/go
         run: |
           TARGET=$(cat targets.txt)
-          export PATH="/usr/local/bin:/usr/bin:/bin:/home/runner/Tools:/home/runner/go/bin:$PATH"
           cd reconftw/
           
-          # Force skip Probing modules
+          # Force create missing Nuclei directories
+          nuclei -update-templates || true
+          
+          # Disable Probing as requested
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
           
-          # -E preserves the forced PATH
-          sudo -E ./reconftw.sh -d $TARGET -r -a -s --deep
+          # RUN: Forces the PATH even under SUDO
+          sudo -E PATH=$PATH ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 5. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
+      # 6. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
       - name: Pack & Send Master Report
         if: always() 
         run: |
           TARGET=$(cat targets.txt)
           if [ -d "reconftw/Recon/$TARGET" ]; then
-            sudo zip -r "ARES_RAW.zip" "reconftw/Recon/$TARGET"
-            # Splits into 45MB parts for Telegram delivery
-            split -b 45M "ARES_RAW.zip" "ARES_PART."
+            sudo zip -r "ARES_FINAL_REPORT.zip" "reconftw/Recon/$TARGET"
+            split -b 45M "ARES_FINAL_REPORT.zip" "ARES_PART."
             for part in ARES_PART.*; do
               curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                    -F document=@"$part" \
@@ -103,7 +92,7 @@ jobs:
             done
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ Error: Results folder empty for $TARGET." \
+                  -F text="❌ CRITICAL FAILURE: Results folder not found. Check install logs for tool errors." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
           
