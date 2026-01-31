@@ -1,4 +1,4 @@
-name: ARES V35 God-Mode
+name: ARES V39 Total Armageddon
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK PURGE: Shreds 30GB+ of junk for maximum scan room
+      # 1. DISK PURGE: Creates maximum room for the massive toolset and results
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
@@ -25,28 +25,36 @@ jobs:
       - name: Telegram Handshake
         run: |
           curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-               -F text="🚀 [ARES V35] God-Mode Online: ${{ github.repository }}" \
+               -F text="🚀 [ARES V39] Total Armageddon Online: ${{ github.repository }}" \
                "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
 
-      # 2. OFFICIAL INSTALL: Standard official installer
-      - name: Official Tool Installation
+      # 2. OFFICIAL COMPLETE INSTALL: Standard official installer
+      - name: Full Suite Installation
         run: |
           export DEBIAN_FRONTEND=noninteractive
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && chmod +x install.sh && ./install.sh
 
-      # 3. THE GOD-MODE BRIDGE: Forcing the system to see the "missing" tools
-      - name: Setup Force Bridge
+      # 3. NUCLEAR WELDING: Forcing EVERY binary into the system path
+      - name: Weld All Tools to System
         run: |
-          mkdir -p /home/runner/.cache /home/runner/.config /home/runner/go /home/runner/Tools
-          # Welding every tool into the system path so they are NEVER "missing"
-          sudo ln -sf /home/runner/Tools/* /usr/local/bin/ || true
+          # Create all required tool directories in the authorized zone
+          mkdir -p /home/runner/.cache /home/runner/.config /home/runner/go/bin /home/runner/Tools
+          
+          # FORCE-LINK: Link every single file from the Tools and Go folders to /usr/local/bin
+          # This ensures the scanner sees EVERY tool (Arjun, Commix, Ghauri, etc.)
+          find /home/runner/Tools -type f -executable -exec sudo ln -sf {} /usr/local/bin/ \; || true
           sudo ln -sf /home/runner/go/bin/* /usr/local/bin/ || true
+          
+          # Setup bridges for permission blocks
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
+          sudo mkdir -p /root
+          sudo ln -sf /home/runner/.cache /root/.cache
+          sudo ln -sf /home/runner/.config /root/.config
           sudo chmod -R 777 /home/runner
 
-      # 4. EXECUTION: Manually injecting the TOOL variable to stop the "Missing" error
+      # 4. EXECUTION: Total Path Dominance
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
@@ -57,12 +65,15 @@ jobs:
           GOPATH: /home/runner/go
         run: |
           TARGET=$(cat targets.txt)
-          # FORCED PATH INJECTION: This makes the "Missing Tools" list disappear
+          # Injecting ALL tool paths directly into the session
           export PATH="/home/runner/Tools:/home/runner/go/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
           cd reconftw/
-          # Disabling Probing directly in the command to save time
+          
+          # Disable HTTP Probing to prevent hanging
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
-          # -E preserves our injected PATH so the tools work
+          sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
+          
+          # Preservation of the forced path while running deep scan
           sudo -E ./reconftw.sh -d $TARGET -r -a -s --deep
           
       # 5. MASTER ZIPPER: Reliable delivery
@@ -71,14 +82,14 @@ jobs:
         run: |
           TARGET=$(cat targets.txt)
           if [ -d "reconftw/Recon/$TARGET" ]; then
-            sudo zip -r "ARES_FINAL_REPORT.zip" "reconftw/Recon/$TARGET"
+            sudo zip -r "ARES_ARMAGEDDON_REPORT.zip" "reconftw/Recon/$TARGET"
             curl -v -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                 -F document=@"ARES_FINAL_REPORT.zip" \
+                 -F document=@"ARES_ARMAGEDDON_REPORT.zip" \
                  -F caption="✅ DONE: $TARGET" \
                  "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ Error: Scan failed. Check if Tools are still missing in logs." \
+                  -F text="❌ Error: Scan failed. Check the 'Missing Tools' list in your logs." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
           
