@@ -1,4 +1,4 @@
-name: ARES V46 God-King
+name: ARES V47 Final Arsenal
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK PURGE: Shreds 30GB+ of junk for maximum scan room
+      # 1. DISK PURGE: Shreds 30GB+ of junk
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
@@ -25,44 +25,36 @@ jobs:
       - name: Telegram Handshake
         run: |
           curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-               -F text="🚀 [ARES V46] God-King Suite Online. Forcing 94+ Tools..." \
+               -F text="🚀 [ARES V47] Arsenal Force Online. Installing 94+ Tools..." \
                "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
 
-      # 2. THE NUCLEAR INSTALLER: Fixes "go not found" and installs all 94+ tools
+      # 2. THE NUCLEAR INSTALLER: Re-installs Go and forces all 94+ tools
       - name: Force All Tools
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          # Fix Go environment first
           sudo apt-get update && sudo apt-get install -y golang-go libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
           
-          # MANIFEST: Official Go Tools Force
+          # MANIFEST: Official Go Tools
           export GOPATH=$HOME/go
           export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
           
-          # Installing core ProjectDiscovery and other Go tools you listed
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest
           go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
-          go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
-          go install -v github.com/ffuf/ffuf/v2@latest
-          go install -v github.com/hahwul/dalfox/v2@latest
-          go install -v github.com/tomnomnom/assetfinder@latest
-          go install -v github.com/tomnomnom/anew@latest
-          go install -v github.com/lc/gau/v2/cmd/gau@latest
           
           # MANIFEST: Pipx Tools (Arjun, Ghauri, Commix, etc.)
           pipx install arjun && pipx install commix && pipx install ghauri && pipx install xnLinkFinder
           
-          # Clone official reconFTW for wordlists and remaining logic
+          # Official installer for wordlists
           git clone --depth 1 https://github.com/six2dez/reconftw
-          cd reconftw/ && chmod +x install.sh && ./install.sh
+          cd reconftw/ && ./install.sh
           
-          # WELDING: Link EVERY tool to system binary path
-          sudo ln -sf $HOME/go/bin/* /usr/local/bin/ || true
-          sudo ln -sf $HOME/.local/bin/* /usr/local/bin/ || true
-          sudo find $HOME/Tools -executable -type f -exec ln -sf {} /usr/local/bin/ \; || true
+          # WELDING: Physically move binaries to /usr/bin so the scanner CANNOT miss them
+          sudo cp $HOME/go/bin/* /usr/bin/ || true
+          sudo cp $HOME/.local/bin/* /usr/bin/ || true
+          sudo find $HOME/Tools -executable -type f -exec cp {} /usr/bin/ \; || true
 
       # 3. ULTIMATE BRIDGE: Fixes Permission Denied
       - name: Setup Force Bridge
@@ -83,14 +75,14 @@ jobs:
           GOPATH: /home/runner/go
         run: |
           TARGET=$(cat targets.txt)
-          export PATH="/home/runner/Tools:/home/runner/go/bin:/home/runner/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+          export PATH="/usr/local/bin:/usr/bin:/bin:/home/runner/Tools:/home/runner/go/bin:$PATH"
           cd reconftw/
           
           # Force skip Probing modules
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
           
-          # Preservation of the forced path while running deep
+          # -E preserves the forced PATH
           sudo -E ./reconftw.sh -d $TARGET -r -a -s --deep
           
       # 5. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
