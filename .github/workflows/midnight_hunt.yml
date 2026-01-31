@@ -1,4 +1,4 @@
-name: ARES V55 Unified King
+name: ARES V56 Unified King
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,19 +16,33 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK PURGE: Max room for the 94+ tools
+      # 1. TELEGRAM DIAGNOSTIC: This will tell you EXACTLY why it's not alerting
+      - name: Telegram Handshake & Debug
+        run: |
+          echo "Testing Telegram Connection..."
+          # Sending a test message and printing the full API response to the log
+          RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=🚀 [ARES V56] System Online. Target: $(cat targets.txt)")
+          echo "Telegram Response: $RESPONSE"
+          
+          # If the response contains 'ok:false', the secret or chat_id is wrong
+          if [[ $RESPONSE != *"\"ok\":true"* ]]; then
+            echo "❌ ERROR: Telegram Handshake Failed. Check your Secrets!"
+          fi
+
+      # 2. DISK PURGE: Max room for the toolset
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
           sudo apt-get clean
 
-      # 2. PROPER GO SETUP: Fixes the 'awk' and 'GOROOT' errors
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: 'stable'
 
-      # 3. GLOBAL ENVIRONMENT LOCK: Locks GOROOT so the installer doesn't crash
+      # 3. GLOBAL ENVIRONMENT LOCK: Fixes 'GOROOT' and 'awk' errors
       - name: Global Environment Lock
         run: |
           echo "/home/runner/go/bin" >> $GITHUB_PATH
@@ -37,47 +51,35 @@ jobs:
           echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
           echo "GOROOT=$(go env GOROOT)" >> $GITHUB_ENV
 
-      # 4. DEPENDENCY & PIPX FORCE: Fixes missing Arjun/Ghauri
       - name: Install Dependencies
         run: |
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
-          
-          # Initialize pipx for Python tools
           pipx ensurepath
-          
-          # Force install core tools manually as a fail-safe
+          # Fail-safe tool installs
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-          
-          # Force update Nuclei templates to kill the Template Path error
           /home/runner/go/bin/nuclei -ut || true
 
-      # 5. OFFICIAL INSTALLER: Controlled with Timeout to prevent hanging
       - name: Official reconFTW Installation
         run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
-          cd reconftw/
-          chmod +x install.sh
-          # Use timeout to prevent infinite hang if installer hits a prompt
+          cd reconftw/ && chmod +x install.sh
           timeout 25m bash -c 'yes | ./install.sh --verbose' || echo "Installer finished with warnings."
 
-      # 6. SYSTEM BINARY WELD: Forces tools into /usr/bin so sudo can see them
+      # 4. SYSTEM BINARY WELD: Crucial for sudo visibility
       - name: System Binary Weld
         run: |
           sudo ln -sf /home/runner/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/.local/bin/* /usr/bin/ || true
-          # Finds all niche tools (Arjun, Ghauri, etc.) and links them
           sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/bin/ \; || true
-          
-          # Permission Bridge
           mkdir -p /home/runner/.cache /home/runner/.config
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
           sudo chmod -R 755 /home/runner
 
-      # 7. EXECUTION: Pure Path Dominance
+      # 5. EXECUTION: Forced Path Dominance
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
@@ -86,15 +88,12 @@ jobs:
         run: |
           TARGET=$(cat targets.txt)
           cd reconftw/
-          
-          # Disable Probing
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
-          
-          # FORCE: Injects every possible path into the sudo command directly
+          # PATH Injection for sudo
           sudo -E PATH=$PATH:/home/runner/go/bin:/home/runner/.local/bin:/home/runner/Tools ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 8. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
+      # 6. SPLIT-ZIPPER: Reliability for large reports
       - name: Pack & Send Master Report
         if: always() 
         run: |
@@ -111,6 +110,6 @@ jobs:
             done
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ FAIL: No data found. Check the 'Official Installation' logs." \
+                  -F text="❌ FAIL: Results folder empty for $TARGET." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
