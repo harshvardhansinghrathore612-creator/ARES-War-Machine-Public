@@ -1,8 +1,8 @@
 name: ARES V3 God Mode Hunter
 on:
   schedule:
-    - cron: '0 0 * * *' # Auto-starts at Midnight
-  workflow_dispatch: # Allows manual start
+    - cron: '0 0 * * *' # Auto-starts at Midnight UTC
+  workflow_dispatch: # Allows manual start from the Actions tab
 
 jobs:
   hunt:
@@ -11,34 +11,47 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         
+      # Handshake: Pings your Telegram so you know which account woke up
+      - name: Telegram Handshake
+        run: |
+          REPO=${{ github.repository }}
+          curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+               -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 [ARES HANDSHAKE] Account: $REPO is ONLINE."
+
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get update && sudo apt-get install -y zip jq curl
 
+      # Cache: Saves ~20 minutes by storing installed tools for 7 days
+      - name: Cache reconFTW Tools
+        id: cache-tools
+        uses: actions/cache@v4
+        with:
+          path: ~/Tools
+          key: ${{ runner.os }}-reconftw-v3
+
       - name: Install reconFTW (Ultimate Edition)
+        if: steps.cache-tools.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
-          cd reconftw/ && ./install.sh -y
+          cd reconftw/ && ./install.sh
           
-      - name: Execute Full Attack Suite
+      - name: Execute God Mode Scan (CWE Hunter)
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Using your custom secret name here
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }} 
         run: |
           TARGET=$(cat targets.txt)
-          cd reconftw/
-          
-          # We export the token so reconFTW tools (like Subfinder) can use it
           export GITHUB_TOKEN=${{ secrets.GIT_PAT }}
-          
-          # -r: Full Recon | -a: Active Attacks | -s: Screenshots | --deep: God Mode
+          export PATH="$HOME/Tools:$PATH"
+          cd reconftw/
+          # -r: Full Recon | -a: Active Attacks (XSS/SQLi) | -s: Screenshots | --deep: Max Power
           ./reconftw.sh -d $TARGET -r -a -s --deep --notifications
           
       - name: Pack & Send Master Report
-        if: always()
+        if: always() # Ensures you get a ZIP even if the 6-hour limit is reached
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -46,4 +59,5 @@ jobs:
           TARGET=$(cat targets.txt)
           zip -r "ARES_GOD_REPORT_${TARGET}.zip" "reconftw/Recon/$TARGET"
           curl -F document=@"ARES_GOD_REPORT_${TARGET}.zip" \
-               "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT_ID&caption=🔥 GOD MODE REPORT: $TARGET"
+               "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT_ID&caption=✅ FINISHED: $TARGET Report Attached."
+               
