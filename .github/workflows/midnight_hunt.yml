@@ -1,4 +1,4 @@
-name: ARES V6 God Mode Hunter
+name: ARES V7 Immortal Hunter
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -13,11 +13,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 1. DISK CLEANER: Reclaims ~30GB+ automatically
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
           sudo apt-get clean
-          echo "Disk space after cleaning:"
           df -h /
 
       - name: Telegram Handshake
@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Tools
-          key: ${{ runner.os }}-reconftw-v6
+          key: ${{ runner.os }}-reconftw-v7
 
       - name: Install reconFTW
         if: steps.cache-tools.outputs.cache-hit != 'true'
@@ -39,19 +39,22 @@ jobs:
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && ./install.sh
 
-      # NEW: PERMISSION FIXER - Solves the "Permission Denied" errors in your logs
-      - name: Fix Directory Permissions
+      # 2. PERMISSION FIXER: Moves the cache to $HOME to bypass root locks
+      - name: Setup Writable Directories
         run: |
-          sudo mkdir -p /.cache
-          sudo chmod -R 777 /.cache
-          sudo chown -R runner:docker $GITHUB_WORKSPACE
+          mkdir -p $HOME/.cache
+          mkdir -p $HOME/.config
+          sudo chmod -R 777 $HOME/.cache
+          sudo chmod -R 777 $HOME/.config
 
       - name: Execute Full Attack Suite
-        timeout-minutes: 335 
+        timeout-minutes: 330 
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }} 
+          # Forces tools to use the writable Home directory instead of root
+          XDG_CACHE_HOME: ${{ github.workspace }}/.cache 
         run: |
           TARGET=$(cat targets.txt)
           export GITHUB_TOKEN=${{ secrets.GIT_PAT }}
@@ -72,6 +75,6 @@ jobs:
                  "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT_ID&caption=✅ ARES REPORT: $TARGET"
           else
             curl -s "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
-                 -d "chat_id=$TG_CHAT_ID&text=❌ Error: No results folder found for $TARGET. Check logs for permission issues."
+                 -d "chat_id=$TG_CHAT_ID&text=❌ Error: No results folder found for $TARGET. Check logs."
           fi
           
