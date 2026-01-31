@@ -1,4 +1,4 @@
-name: ARES V10 Overlord Hunter
+name: ARES V13 Fresh Hunter
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,6 +16,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 1. DISK CLEANING: Reclaims 30GB+ so tools don't crash
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
@@ -28,34 +29,28 @@ jobs:
           curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
                -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 [ARES HANDSHAKE] Account: $REPO is ONLINE."
 
-      - name: Cache reconFTW Tools
-        id: cache-tools
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/Tools
-          key: ${{ runner.os }}-reconftw-v10
-
+      # 2. FRESH INSTALL: No caching, it downloads every time for 100% stability
       - name: Install reconFTW
-        if: steps.cache-tools.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && ./install.sh
 
-      # Fixes the 'Permission Denied' errors from your logs by forcing the environment to Home
+      # 3. PERMISSION SETUP: Forces tools into the authorized Home folder
       - name: Setup Writable Environment
         run: |
           mkdir -p /home/runner/.cache
           mkdir -p /home/runner/.config
-          mkdir -p /home/runner/.local
+          mkdir -p /home/runner/.local/share
           chmod -R 777 /home/runner
 
+      # 4. EXECUTION: Clean command without the broken '--notifications' flag
       - name: Execute Full Attack Suite
-        timeout-minutes: 330 
+        timeout-minutes: 310 # Leaves 50 mins for the large ZIP transfer
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }} 
-          # CRITICAL: Forces ALL Go and Recon tools to use Home, not Root
+          # Fixes the 'Permission Denied' errors from your logs
           HOME: /home/runner
           XDG_CACHE_HOME: /home/runner/.cache
           XDG_CONFIG_HOME: /home/runner/.config
@@ -65,9 +60,9 @@ jobs:
           export GITHUB_TOKEN=${{ secrets.GIT_PAT }}
           export PATH="/home/runner/Tools:$PATH"
           cd reconftw/
-          # FIXED: Removed broken '--notifications' flag to prevent syntax error
           ./reconftw.sh -d $TARGET -r -a -s --deep
           
+      # 5. THE ZIPPER: Sends results even if the scan hits the time limit
       - name: Pack & Send Master Report
         if: always() 
         env:
@@ -81,6 +76,6 @@ jobs:
                  "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT_ID&caption=✅ ARES REPORT: $TARGET"
           else
             curl -s "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
-                 -d "chat_id=$TG_CHAT_ID&text=❌ Error: Scan for $TARGET failed. Check logs for tool issues."
+                 -d "chat_id=$TG_CHAT_ID&text=❌ Error: Scan for $TARGET failed. No results folder found."
           fi
           
