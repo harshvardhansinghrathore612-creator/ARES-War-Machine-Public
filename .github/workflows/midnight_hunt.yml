@@ -1,4 +1,4 @@
-name: ARES V43 Total Manifest
+name: ARES V45 Absolute Arsenal
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,36 +16,58 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK PURGE: Creates 35GB+ of room for the 94 tools
+      # 1. DISK PURGE: Creates 30GB+ of room for the massive toolset
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
           sudo apt-get clean
 
-      # 2. THE MASTER INSTALLER: Using the official script + dependency force
+      - name: Telegram Handshake
+        run: |
+          curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+               -F text="🚀 [ARES V45] Starting Absolute Arsenal Force. Installing 94+ Tools..." \
+               "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
+
+      # 2. THE MASTER MANIFEST: Manually forcing every missing tool onto the disk
       - name: Force Full Suite Install
         run: |
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
+          
+          # MANIFEST: Official Go Tools Force
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+          go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+          go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+          go install -v github.com/ffuf/ffuf/v2@latest
+          go install -v github.com/hahwul/dalfox/v2@latest
+          go install -v github.com/tomnomnom/assetfinder@latest
+          go install -v github.com/tomnomnom/waybackurls@latest
+          go install -v github.com/tomnomnom/anew@latest
+          
+          # MANIFEST: Pipx Tools (Arjun, Ghauri, Commix, etc.)
+          pipx install arjun && pipx install commix && pipx install ghauri && pipx install xnLinkFinder && pipx install dnsvalidator && pipx install wafw00f && pipx install urless
+          
+          # Run official installer for remaining 50+ tools and wordlists
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && chmod +x install.sh && ./install.sh
-
-      # 3. THE "DEEP-WELD": Manually linking every tool found on the disk
-      - name: Deep Tool Verification
-        run: |
-          mkdir -p /home/runner/.cache /home/runner/.config /home/runner/go/bin /home/runner/Tools
-          # Link standard Go tools
+          
+          # WELDING: Link EVERY tool from Go, Pipx, and Tools to the system bin
           sudo ln -sf /home/runner/go/bin/* /usr/local/bin/ || true
-          # Link PIPX tools (Arjun, Commix, Ghauri, etc.)
           sudo ln -sf /home/runner/.local/bin/* /usr/local/bin/ || true
-          # RECURSIVE LINK: Finds tools hidden in sub-folders of /Tools
           sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/local/bin/ \; || true
-          # Bridges for locked system folders
+
+      # 3. ULTIMATE BRIDGE: Fixes Permission Denied on locked folders
+      - name: Setup Force Bridge
+        run: |
+          mkdir -p /home/runner/.cache /home/runner/.config /home/runner/go /home/runner/Tools
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
           sudo chmod -R 777 /home/runner
 
-      # 4. EXECUTION: Total Path Dominance with Probing Surgically Removed
+      # 4. EXECUTION: Absolute Path Dominance
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
@@ -56,31 +78,35 @@ jobs:
           GOPATH: /home/runner/go
         run: |
           TARGET=$(cat targets.txt)
-          # Absolute path priority injection
           export PATH="/home/runner/Tools:/home/runner/go/bin:/home/runner/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
           cd reconftw/
           
-          # Force skip Probing modules
+          # Surgical Removal of HTTP Probing Only
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
           
-          # Preserve Path (-E) and run every tool (--deep)
+          # Preservation of the forced path while running deep
           sudo -E ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 5. MASTER ZIPPER: Reliable delivery
+      # 5. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
       - name: Pack & Send Master Report
         if: always() 
         run: |
           TARGET=$(cat targets.txt)
           if [ -d "reconftw/Recon/$TARGET" ]; then
-            sudo zip -r "ARES_COMPLETE_REPORT.zip" "reconftw/Recon/$TARGET"
-            curl -v -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                 -F document=@"ARES_COMPLETE_REPORT.zip" \
-                 -F caption="✅ DONE: $TARGET" \
-                 "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
+            sudo zip -r "ARES_RAW.zip" "reconftw/Recon/$TARGET"
+            # Splits into 45MB parts for Telegram delivery
+            split -b 45M "ARES_RAW.zip" "ARES_PART."
+            for part in ARES_PART.*; do
+              curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+                   -F document=@"$part" \
+                   -F caption="📦 Part $part for $TARGET" \
+                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
+              sleep 2
+            done
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ CRITICAL: Scan for $TARGET produced no data. Tools are still missing from the environment." \
+                  -F text="❌ Error: Scan for $TARGET failed. Results folder not found." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
           
