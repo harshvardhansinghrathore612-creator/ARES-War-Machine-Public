@@ -1,4 +1,4 @@
-name: ARES V27 Absolute God
+name: ARES V28 Absolute Stable
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK PURGE: Shreds 30GB+ of junk for maximum scan room
+      # 1. DISK PURGE: Shreds 30GB+ for maximum room
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
@@ -24,38 +24,37 @@ jobs:
 
       - name: Telegram Handshake
         run: |
-          # Safe handshake using Form Fields to avoid URL errors
           curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-               -F text="🚀 [ARES V27] Absolute God Online: ${{ github.repository }}" \
+               -F text="🚀 [ARES V28] Stable Hunt Started: ${{ github.repository }}" \
                "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
 
-      # 2. FRESH INSTALL: No cache. Downloads everything fresh.
+      # 2. FRESH INSTALL: No cache.
       - name: Install reconFTW
         run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && ./install.sh
 
-      # 3. HTTP PROBING REMOVAL: Skips the 'Stuck' 30-minute steps
+      # 3. CONFIG SURGERY: Skips the 30-minute HTTP Probing
       - name: Disable HTTP Probing
         run: |
           cd reconftw/
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
 
-      # 4. PATH OVERRIDE: Redirects locked root folders to authorized Home folder
-      - name: Setup Absolute Environment
+      # 4. PATH FIX: No symlinks. Just create the folders in the safe Home area
+      - name: Setup Safe Environment
         run: |
-          mkdir -p /home/runner/.cache
-          mkdir -p /home/runner/.config
-          mkdir -p /home/runner/go
-          sudo ln -sf /home/runner/.cache /.cache
-          sudo chmod -R 777 /home/runner
+          mkdir -p $HOME/.cache
+          mkdir -p $HOME/.config
+          mkdir -p $HOME/go
+          chmod -R 777 $HOME
 
-      # 5. EXECUTION: Deep scan with probing disabled in the config above
+      # 5. EXECUTION: Using deep redirection to stop the Permission Denied errors
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
+          # Forces tools to stay in the authorized /home/runner folder
           HOME: /home/runner
           XDG_CACHE_HOME: /home/runner/.cache
           XDG_CONFIG_HOME: /home/runner/.config
@@ -64,24 +63,26 @@ jobs:
           TARGET=$(cat targets.txt)
           export PATH="$HOME/Tools:$HOME/go/bin:$PATH"
           cd reconftw/
-          # No broken flags. Deep discovery remains active.
+          # Running as current user (no sudo) to keep environment variables active
           ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 6. MASTER ZIPPER: Fixed curl syntax for guaranteed Telegram delivery
+      # 6. MASTER ZIPPER: Checks if data exists before sending
       - name: Pack & Send Master Report
         if: always() 
         run: |
           TARGET=$(cat targets.txt)
+          # DEBUG: Lists files so we can see if the folder is empty
+          ls -R reconftw/Recon/$TARGET || echo "Folder is empty!"
+          
           if [ -d "reconftw/Recon/$TARGET" ]; then
-            zip -r "ARES_FINAL_REPORT.zip" "reconftw/Recon/$TARGET"
-            # USES FORM DATA (-F): This prevents the 'Malformed input' error
+            zip -r "ARES_REPORT.zip" "reconftw/Recon/$TARGET"
             curl -v -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                 -F document=@"ARES_FINAL_REPORT.zip" \
+                 -F document=@"ARES_REPORT.zip" \
                  -F caption="✅ DONE: $TARGET" \
                  "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ Error: Report folder not found for $TARGET. Check logs for early crashes." \
+                  -F text="❌ CRITICAL ERROR: The scan produced NO DATA for $TARGET. Check GitHub logs for tool crashes." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
           
