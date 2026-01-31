@@ -1,40 +1,37 @@
-name: ARES V5 God Mode Hunter
+name: ARES V6 God Mode Hunter
 on:
   schedule:
-    - cron: '0 0 * * *' # Auto-starts at Midnight UTC
-  workflow_dispatch: # Allows you to press "Start" manually
+    - cron: '0 0 * * *' 
+  workflow_dispatch: 
 
 jobs:
   hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # Hard GitHub Limit (6 Hours)
+    timeout-minutes: 360 
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. DISK CLEANER: Reclaims ~30GB+ of space for your results
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
           sudo apt-get clean
-          echo "Disk space after aggressive cleaning:"
+          echo "Disk space after cleaning:"
           df -h /
 
-      # 2. HANDSHAKE: Proof the account is working
       - name: Telegram Handshake
         run: |
           REPO=${{ github.repository }}
           curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-               -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 [ARES HANDSHAKE] Account: $REPO is ONLINE and CLEANED."
+               -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=🚀 [ARES HANDSHAKE] Account: $REPO is ONLINE."
 
-      # 3. CACHE: Skips the 20-minute install after the 1st run
       - name: Cache reconFTW Tools
         id: cache-tools
         uses: actions/cache@v4
         with:
           path: ~/Tools
-          key: ${{ runner.os }}-reconftw-v5
+          key: ${{ runner.os }}-reconftw-v6
 
       - name: Install reconFTW
         if: steps.cache-tools.outputs.cache-hit != 'true'
@@ -42,9 +39,15 @@ jobs:
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && ./install.sh
 
-      # 4. THE SCAN: God Mode + Safety Net Timer
+      # NEW: PERMISSION FIXER - Solves the "Permission Denied" errors in your logs
+      - name: Fix Directory Permissions
+        run: |
+          sudo mkdir -p /.cache
+          sudo chmod -R 777 /.cache
+          sudo chown -R runner:docker $GITHUB_WORKSPACE
+
       - name: Execute Full Attack Suite
-        timeout-minutes: 335 # Kills scan at 5h 35m to leave room for the ZIP
+        timeout-minutes: 335 
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -54,10 +57,8 @@ jobs:
           export GITHUB_TOKEN=${{ secrets.GIT_PAT }}
           export PATH="$HOME/Tools:$PATH"
           cd reconftw/
-          # -r: Recon | -a: Active (XSS/SQLi) | -s: Screens | --deep: Max Power
           ./reconftw.sh -d $TARGET -r -a -s --deep --notifications
           
-      # 5. THE ZIPPER: Sends results even if scan times out
       - name: Pack & Send Master Report
         if: always() 
         env:
@@ -71,6 +72,6 @@ jobs:
                  "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT_ID&caption=✅ ARES REPORT: $TARGET"
           else
             curl -s "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
-                 -d "chat_id=$TG_CHAT_ID&text=❌ Error: No results folder found for $TARGET."
+                 -d "chat_id=$TG_CHAT_ID&text=❌ Error: No results folder found for $TARGET. Check logs for permission issues."
           fi
           
