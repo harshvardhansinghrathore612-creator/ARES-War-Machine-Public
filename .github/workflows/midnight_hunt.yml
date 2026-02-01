@@ -1,4 +1,4 @@
-name: ARES V56 Unified King
+name: ARES V58 Absolute Finality
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,70 +16,59 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. TELEGRAM DIAGNOSTIC: This will tell you EXACTLY why it's not alerting
-      - name: Telegram Handshake & Debug
+      # 1. TOTAL PURGE: Kills pre-installed Go to prevent the GOROOT error
+      - name: Maximize Disk Space & Purge
         run: |
-          echo "Testing Telegram Connection..."
-          # Sending a test message and printing the full API response to the log
-          RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=🚀 [ARES V56] System Online. Target: $(cat targets.txt)")
-          echo "Telegram Response: $RESPONSE"
-          
-          # If the response contains 'ok:false', the secret or chat_id is wrong
-          if [[ $RESPONSE != *"\"ok\":true"* ]]; then
-            echo "❌ ERROR: Telegram Handshake Failed. Check your Secrets!"
-          fi
-
-      # 2. DISK PURGE: Max room for the toolset
-      - name: Maximize Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
+          sudo rm -rf /usr/local/go /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/az /opt/hostedtoolcache
           sudo apt-get clean
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-
-      # 3. GLOBAL ENVIRONMENT LOCK: Fixes 'GOROOT' and 'awk' errors
-      - name: Global Environment Lock
+      # 2. HARDCODED GO INSTALL: Fixes the 'awk' and 'GOROOT' issues for good
+      - name: Force Official Go Installation
         run: |
+          wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
+          sudo tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz
+          # WELDING: Lock the paths into the global system brain
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
           echo "/home/runner/go/bin" >> $GITHUB_PATH
-          echo "/home/runner/.local/bin" >> $GITHUB_PATH
-          echo "/home/runner/Tools" >> $GITHUB_PATH
+          echo "GOROOT=/usr/local/go" >> $GITHUB_ENV
           echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
-          echo "GOROOT=$(go env GOROOT)" >> $GITHUB_ENV
 
-      - name: Install Dependencies
+      - name: Telegram Handshake
         run: |
-          export DEBIAN_FRONTEND=noninteractive
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=🚀 [ARES V58] God-Mode Finality Online. Target: $(cat targets.txt)"
+
+      # 3. DEPENDENCIES: Critical libraries for Arjun, Ghauri, and more
+      - name: Install System Dependencies
+        run: |
           sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
           pipx ensurepath
-          # Fail-safe tool installs
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-          /home/runner/go/bin/nuclei -ut || true
 
+      # 4. THE OFFICIAL INSTALLER: Running the full 94+ tool suite
       - name: Official reconFTW Installation
         run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && chmod +x install.sh
-          timeout 25m bash -c 'yes | ./install.sh --verbose' || echo "Installer finished with warnings."
+          # Forces 'yes' to every prompt to ensure full install
+          yes | ./install.sh --verbose
 
-      # 4. SYSTEM BINARY WELD: Crucial for sudo visibility
+      # 5. THE BINARY WELD: Making everything visible to sudo
       - name: System Binary Weld
         run: |
+          sudo ln -sf /usr/local/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/.local/bin/* /usr/bin/ || true
+          # Recurse into Tools folder to find Arjun, Ghauri, etc.
           sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/bin/ \; || true
+          
+          # Fix Permission Denied & Cache Errors
           mkdir -p /home/runner/.cache /home/runner/.config
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
-          sudo chmod -R 755 /home/runner
+          sudo chmod -R 777 /home/runner
 
-      # 5. EXECUTION: Forced Path Dominance
+      # 6. EXECUTION: Total Path Dominance (No Probing)
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
@@ -87,13 +76,20 @@ jobs:
           HOME: /home/runner
         run: |
           TARGET=$(cat targets.txt)
+          export PATH="/usr/local/go/bin:/home/runner/go/bin:/home/runner/.local/bin:/usr/bin:/bin:$PATH"
           cd reconftw/
+          
+          # Fix Nuclei Templates
+          nuclei -ut || true
+          
+          # Disable Probing as requested
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
-          # PATH Injection for sudo
-          sudo -E PATH=$PATH:/home/runner/go/bin:/home/runner/.local/bin:/home/runner/Tools ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 6. SPLIT-ZIPPER: Reliability for large reports
+          # Execute with direct PATH injection for sudo
+          sudo -E PATH=$PATH ./reconftw.sh -d $TARGET -r -a -s --deep
+          
+      # 7. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
       - name: Pack & Send Master Report
         if: always() 
         run: |
@@ -110,6 +106,7 @@ jobs:
             done
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ FAIL: Results folder empty for $TARGET." \
+                  -F text="❌ FAIL: Check 'Manual Go Installation' log. Go environment is likely still broken." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
+          
