@@ -1,4 +1,4 @@
-name: ARES War Machine - Manual Absolute 100%
+name: ARES War Machine - Absolute OAuth2
 on:
   workflow_dispatch:
 
@@ -9,64 +9,66 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GIT_PAT }}
 
-      - name: "Full Global Installation & Environment Setup"
+      - name: "Global Arsenal Installation"
         run: |
-          # 1. CORE SYSTEM
           sudo apt-get update
           sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev
-          mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/sqlmap output/commix output/vulns output/specialized
+          mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/vulns
           echo "$HOME/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+          pip3 install google-api-python-client google-auth-oauthlib google-auth-httplib2
 
-          # 2. GO TOOLS (ALL OF THEM)
+          # --- MASSIVE TOOL INSTALLATION ---
+          # ProjectDiscovery Suite
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
-          go install -v github.com/lc/gau/v2/cmd/gau@latest || true
-          go install -v github.com/jaeles-project/gospider@latest || true
           go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest || true
+          go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest || true
+          go install -v github.com/projectdiscovery/alterx/cmd/alterx@latest || true
+          
+          # Web & Vuln Tools
+          go install -v github.com/lc/gau/v2/cmd/gau@latest || true
           go install -v github.com/hahwul/dalfox/v2@latest || true
           go install -v github.com/ffuf/ffuf@latest || true
-          go install -v github.com/projectdiscovery/subjack@latest || true
           go install -v github.com/sensepost/gowitness@latest || true
-          go install -v github.com/michenriksen/aquatone@latest || true
-          go install -v github.com/tomnomnom/hacks/kxss@latest || true
-          go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest || true
-
-          # 3. PYTHON/RUBY/TOOL REPOS (THE ENTIRE LIST)
-          sudo gem install wpscan || true
-          pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap xsstrike openredirex waymore jsluice jwt_tool kiterunner tplmap sstimap ssrfmap corsy crlfsuite smuggler h2csmuggler racetheweb wpscan trivy dumpsterdiver credsweeper detect-secrets eyewitness || true
+          go install -v github.com/tomnomnom/waybackurls@latest || true
           
+          # Python & Other Arsenals
+          pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap waymore jsluice jwt_tool kiterunner wpscan eyewitness secretfinder || true
+          
+          # Specialized Git & JS Tools
           git clone https://github.com/m4ll0k/SecretFinder.git $HOME/tools/SecretFinder && pip3 install -r $HOME/tools/SecretFinder/requirements.txt || true
-          git clone https://github.com/1N3/LinkFinder.git $HOME/tools/LinkFinder && pip3 install -r $HOME/tools/LinkFinder/requirements.txt || true
-          git clone https://github.com/tarunkant/Gopherus.git $HOME/tools/Gopherus || true
-          git clone https://github.com/marlospasqualini/LFISuite.git $HOME/tools/LFISuite || true
-          git clone https://github.com/frohoff/ysoserial.git $HOME/tools/ysoserial || true
           git clone https://github.com/obheda12/GitDorker.git $HOME/tools/GitDorker || true
-          
-          wget https://raw.githubusercontent.com/haccer/subjack/master/fingerprints.json -O $HOME/tools/fingerprints.json
-          wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O $HOME/tools/common.txt
 
-      - name: "ARES Execution Engine"
+      - name: "ARES Execution & Harsh-Mode Sync"
         env:
-          GDRIVE_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT }}
-          FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          FOLDER_ID: "1kkJnI4qtvfYukua8F1uzoimQyxBlBsWM"
         run: |
           TARGET=$(cat targets.txt | head -n 1)
-          cat << 'EOF' > simple_upload.py
-          import os, sys, json
-          from google.oauth2 import service_account
+          
+          # The OAuth2 Uploader Logic
+          cat << 'EOF' > oauth_upload.py
+          import os, sys
+          from google.oauth2.credentials import Credentials
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
-          def upload(f_path, f_id):
-              creds = service_account.Credentials.from_service_account_info(json.loads(os.environ['GDRIVE_JSON']))
-              service = build('drive', 'v3', credentials=creds)
+
+          def upload(f_path, folder_id):
+              if not os.path.exists(f_path): return
+              creds = Credentials(None, refresh_token=os.environ['REFRESH_TOKEN'], 
+                                 token_uri="https://oauth2.googleapis.com/token",
+                                 client_id=os.environ['CLIENT_ID'], 
+                                 client_secret=os.environ['CLIENT_SECRET'])
+              service = build("drive", "v3", credentials=creds)
+              meta = {"name": os.path.basename(f_path), "parents": [folder_id]}
               media = MediaFileUpload(f_path, resumable=True)
-              service.files().create(body={'name':os.path.basename(f_path),'parents':[f_id]}, media_body=media, supportsAllDrives=True).execute()
+              service.files().create(body=meta, media_body=media, supportsAllDrives=True).execute()
+
           if __name__ == "__main__":
               upload(sys.argv[1], sys.argv[2])
           EOF
@@ -75,49 +77,41 @@ jobs:
             curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d parse_mode="Markdown" -d text="$1"
           }
 
-          # STAGE 1: DOMAINS
-          send_msg "🔍 *Stage 1: Domains*"
-          subfinder -d $TARGET -o output/recon/subs.txt
-          subjack -w output/recon/subs.txt -c $HOME/tools/fingerprints.json -o output/recon/takeovers.txt || true
-          zip -r "1_DOMAINS_${TARGET}.zip" output/recon/
-          python3 simple_upload.py "1_DOMAINS_${TARGET}.zip" "$FOLDER_ID"
+          # --- STAGE 1: RECON ---
+          send_msg "🚀 *ARES:* Starting Recon on \`$TARGET\`"
+          subfinder -d $TARGET -all -recursive -o output/recon/subs.txt
+          python3 oauth_upload.py "output/recon/subs.txt" "$FOLDER_ID"
 
-          # STAGE 2: VISUAL & PROBE
-          send_msg "📷 *Stage 2: Visual*"
-          httpx -l output/recon/subs.txt -o output/probing/live.txt
+          # --- STAGE 2: LIVE PROBING & VISUAL ---
+          httpx -l output/recon/subs.txt -sc -td -title -o output/probing/live.txt
+          python3 oauth_upload.py "output/probing/live.txt" "$FOLDER_ID"
+          
           xvfb-run gowitness file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
-          cat output/probing/live.txt | xvfb-run aquatone -out output/aquatone_report || true
-          zip -r "2_VISUAL_${TARGET}.zip" output/probing/ output/screenshots/ output/aquatone_report/
-          python3 simple_upload.py "2_VISUAL_${TARGET}.zip" "$FOLDER_ID"
+          zip -r "screenshots.zip" output/screenshots/
+          python3 oauth_upload.py "screenshots.zip" "$FOLDER_ID"
 
-          # STAGE 3: CRAWL & SECRETS
-          send_msg "🕷️ *Stage 3: Crawl*"
-          katana -list output/probing/live.txt -o output/crawling/urls.txt
-          jsluice urls < output/crawling/urls.txt > output/crawling/js_links.txt || true
-          python3 $HOME/tools/SecretFinder/SecretFinder.py -i $TARGET -e -o cli > output/secrets/found_secrets.txt || true
-          zip -r "3_CRAWL_${TARGET}.zip" output/crawling/ output/secrets/
-          python3 simple_upload.py "3_CRAWL_${TARGET}.zip" "$FOLDER_ID"
+          # --- STAGE 3: FUZZING & URLS ---
+          katana -l output/probing/live.txt -d 5 -o output/crawling/urls.txt
+          python3 oauth_upload.py "output/crawling/urls.txt" "$FOLDER_ID"
+          
+          waybackurls $TARGET > output/crawling/wayback.txt || true
+          python3 oauth_upload.py "output/crawling/wayback.txt" "$FOLDER_ID"
 
-          # STAGE 4: VULNS (THE BIG ONE)
-          send_msg "🧪 *Stage 4: Vulns*"
-          nuclei -l output/probing/live.txt -o output/vulns/nuclei.txt || true
-          sqlmap -m output/crawling/urls.txt --batch --random-agent --level 1 --risk 1 --output-dir=output/sqlmap || true
-          commix --url-file=output/crawling/urls.txt --batch --output-dir=output/commix || true
+          # --- STAGE 4: VULNS & SECRETS ---
+          nuclei -l output/probing/live.txt -severity critical,high,medium -o output/vulns/nuclei.txt || true
+          python3 oauth_upload.py "output/vulns/nuclei.txt" "$FOLDER_ID"
+
           dalfox file output/crawling/urls.txt -o output/vulns/xss.txt || true
-          zip -r "4_VULNS_${TARGET}.zip" output/vulns/ output/sqlmap/ output/commix/
-          python3 simple_upload.py "4_VULNS_${TARGET}.zip" "$FOLDER_ID"
+          python3 oauth_upload.py "output/vulns/xss.txt" "$FOLDER_ID"
 
-          # STAGE 5: SPECIALIZED
-          send_msg "🕵️ *Stage 5: Specialized*"
-          python3 $HOME/tools/GitDorker/GitDorker.py -t $TARGET -q $TARGET -o output/specialized/gitdorks.txt || true
-          jwt_tool -M pb -t $TARGET > output/specialized/jwt.txt || true
-          python3 $HOME/tools/Gopherus/gopherus.py --exploit mysql --url $TARGET > output/specialized/gopherus.txt || true
-          zip -r "5_FINAL_${TARGET}.zip" output/specialized/
-          python3 simple_upload.py "5_FINAL_${TARGET}.zip" "$FOLDER_ID"
+          ghauri -u "http://$TARGET" --batch --dbs > output/vulns/sql_check.txt || true
+          python3 oauth_upload.py "output/vulns/sql_check.txt" "$FOLDER_ID"
 
-      - name: "Cleanup"
+          # Secret Hunting
+          cat output/crawling/urls.txt | grep ".js" | xargs -I % python3 $HOME/tools/SecretFinder/SecretFinder.py -i % -o cli > output/secrets/js_secrets.txt || true
+          python3 oauth_upload.py "output/secrets/js_secrets.txt" "$FOLDER_ID"
+
+      - name: "Mission Complete"
         if: always()
         run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d text="✅ **ARES Machine Run Finished.** Check Drive Zips."
-          rm -rf output/ *.zip
-          
+          send_msg "✅ *ARES Mission Complete.* All data is in your Drive."
