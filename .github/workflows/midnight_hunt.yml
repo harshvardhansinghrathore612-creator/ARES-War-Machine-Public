@@ -1,4 +1,4 @@
-name: ARES V66 Final Fusion
+name: ARES V69 Command Center
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,118 +16,111 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. IMMEDIATE START NOTIFICATION
-      - name: Instant Telegram Alert
+      # 1. THE SIGNAL: Instant confirmation that the machine is alive
+      - name: Telegram: System Wake-Up
         run: |
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=🔥 [ARES V66] SYSTEM ONLINE%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AStatus: Starting installation..."
+            -d "text=⚡ [ARES V69] COMMAND CENTER ONLINE%0A━━━━━━━━━━━━━━━━%0A🎯 Target: $TARGET%0A🏗️ Phase: System Initialization..."
 
-      # 2. DISK PURGE: Creates 30GB+ room
+      # 2. THE PURGE: Creating room for the heavy tools
       - name: Maximize Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
           sudo apt-get clean
 
-      # 3. HARDCODED GO INSTALL: Fixes GOROOT/awk errors from your logs
+      # 3. GO-FORCE: Fixing GOROOT permanently
       - name: Force Official Go Installation
         run: |
           wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
           sudo tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
           echo "/home/runner/go/bin" >> $GITHUB_PATH
-          echo "/home/runner/.local/bin" >> $GITHUB_PATH
           echo "GOROOT=/usr/local/go" >> $GITHUB_ENV
           echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
 
-      # 4. DEPENDENCIES & CORE TOOLS
-      - name: Install System Dependencies
+      # 4. OFFICIAL INSTALLER: Building the 94+ tool suite
+      - name: Official reconFTW Installation
         run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=🛠️ Installing Official Toolchain... (20-25 mins)"
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx bc
           pipx ensurepath
-          
-          # Force core tools manually as a fail-safe
-          export PATH=$PATH:/usr/local/go/bin
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-          /home/runner/go/bin/nuclei -ut || true
-
-      # 5. OFFICIAL RECONFTW INSTALLATION
-      - name: Official reconFTW Installation
-        run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && chmod +x install.sh
-          timeout 25m bash -c 'yes | ./install.sh --verbose' || echo "Installation completed with warnings"
+          yes | ./install.sh --verbose
 
-      # 6. SYSTEM BINARY WELD: Crucial for 'sudo' visibility
+      # 5. THE BINARY WELD: Forcing tools into the system root
       - name: System Binary Weld
         run: |
           sudo ln -sf /usr/local/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/.local/bin/* /usr/bin/ || true
           sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/bin/ \; || true
-          
           mkdir -p /home/runner/.cache /home/runner/.config
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
           sudo chmod -R 755 /home/runner
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=✅ Toolchain Welded. Every tool is now visible to the scanner."
 
-      # 7. EXECUTION
+      # 6. LIVE-PULSE EXECUTION: Real-time feedback
       - name: Execute Full Attack Suite
-        timeout-minutes: 310
+        timeout-minutes: 320
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
           HOME: /home/runner
         run: |
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
+          export PATH="/usr/local/go/bin:/home/runner/go/bin:/home/runner/.local/bin:/usr/bin:/bin:$PATH"
+          cd reconftw/
           
-          # SEND SCAN START NOTIFICATION
+          # PULSE: Starting Recon
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=🎯 SCAN STARTED%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AProbing: Disabled%0A%0AEstimated time: 4-5 hours..."
+            -d "text=🛰️ PHASE 1: Passive Reconnaissance Started for $TARGET"
           
-          cd reconftw/
-          sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
-          sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
+          nuclei -ut || true
+          sed -i 's/WEBPROBEFULL=false/WEBPROBEFULL=true/g' reconftw.cfg
+          sed -i 's/NUCLEICHECK=false/NUCLEICHECK=true/g' reconftw.cfg
           
-          # Execute with full injected PATH for sudo
-          sudo -E PATH=$PATH ./reconftw.sh -d $TARGET -r -a -s --deep
+          # FORCED LOGGING: We run it as root and watch for the finish line
+          sudo -E PATH=$PATH ./reconftw.sh -d $TARGET -r -a -s --deep && \
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=💀 PHASE 2: Active Attacks Completed for $TARGET. Starting Report Zip..."
 
-      # 8. SMART SPLIT-ZIPPER WITH STATUS ALERTS
+      # 7. SMART SPLIT-ZIPPER: Sending every part of the scan
       - name: Pack & Send Master Report
         if: always() 
         run: |
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
-          
-          if [ -d "reconftw/Recon/$TARGET" ] && [ "$(ls -A reconftw/Recon/$TARGET 2>/dev/null)" ]; then
+          if [ -d "reconftw/Recon/$TARGET" ]; then
             FILE_COUNT=$(find "reconftw/Recon/$TARGET" -type f | wc -l)
             sudo zip -r "ARES_REPORT.zip" "reconftw/Recon/$TARGET"
             FILE_SIZE=$(stat -c%s "ARES_REPORT.zip")
             SIZE_MB=$(echo "scale=2; $FILE_SIZE/1024/1024" | bc)
             
+            # Final Stats
             curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
               -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-              -d "text=✅ SCAN COMPLETE%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AFiles: $FILE_COUNT%0ASize: ${SIZE_MB}MB%0A%0A📤 Uploading results..."
+              -d "text=🏁 SCAN FINISHED%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AFiles: $FILE_COUNT%0ASize: ${SIZE_MB}MB%0A%0A📦 Sending parts individually..."
             
-            # SPLIT LOGIC: 45MB parts
             split -b 45M "ARES_REPORT.zip" "ARES_PART."
-            TOTAL_PARTS=$(ls ARES_PART.* | wc -l)
-            CURRENT_PART=1
-            
             for part in ARES_PART.*; do
               curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                    -F document=@"$part" \
-                   -F caption="📦 Part $CURRENT_PART of $TOTAL_PARTS for $TARGET" \
+                   -F caption="📦 Part $part for $TARGET" \
                    "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
-              CURRENT_PART=$((CURRENT_PART + 1))
               sleep 3
             done
           else
-            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-              -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-              -d "text=❌ SCAN FAILED%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AReason: Results folder empty or tools failed."
+             curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+               -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+               -d "text=❌ FATAL ERROR: No results directory found for $TARGET. Check logs for tool crashes."
           fi
           
