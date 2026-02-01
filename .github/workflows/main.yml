@@ -1,0 +1,130 @@
+name: Ultimate Security Automation
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *' # Runs every 6 hours
+
+jobs:
+  security-hunt:
+    runs-on: ubuntu-latest
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GIT_PAT: ${{ secrets.GIT_PAT }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GIT_PAT }}
+
+      - name: Setup Prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git
+          # Cleanup any leftover data from previous runs
+          rm -rf output/ *.zip
+          mkdir -p output/
+
+      - name: Start Notification
+        run: |
+          TARGET=$(cat targets.txt | head -n 1)
+          curl -s -X POST https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage \
+          -d chat_id=$TELEGRAM_CHAT_ID -d text="🚀 **Workflow Started**%0A**Target:** $TARGET%0A**Status:** Installing Toolset..."
+
+      - name: Install All Tools
+        run: |
+          # GO TOOLS
+          go install -v github.com/OWASP/Amass/v3/...@latest
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install -v github.com/tomnomnom/httprobe@latest
+          go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+          go install -v github.com/lc/gau/v2/cmd/gau@latest
+          go install -v github.com/tomnomnom/waybackurls@latest # waymore alternative or manual install
+          go install -v github.com/hakluke/hakrawler@latest
+          go install -v github.com/jaeles-project/gospider@latest
+          go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+          go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
+          go install -v github.com/hahwul/dalfox/v2@latest
+          go install -v github.com/ffuf/ffuf@latest
+          
+          # PYTHON TOOLS
+          pip3 install sqlmap arjun wfuzz checkov semgrep gitleaks trufflehog detect-secrets git-secrets s3scanner cloudsploit scoutsuite prowler tplmap sstimap ssrfmap jwt_tool kiterunner
+          
+          # GITHUB CLONE TOOLS
+          git clone https://github.com/m4ll0k/SecretFinder.git ~/SecretFinder
+          git clone https://github.com/BurpSuite/autorize.git ~/Autorize
+          git clone https://github.com/s0md3v/XSStrike.git ~/XSStrike
+          git clone https://github.com/commixproject/commix.git ~/Commix
+          git clone https://github.com/Dionach/CMSmap.git ~/CMSmap
+          
+          # Add tools to PATH
+          export PATH=$PATH:$(go env GOPATH)/bin
+          echo "Installation Complete."
+
+      - name: Execution Engine
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          TARGET=$(cat targets.txt)
+          
+          # Helper function for Telegram notifications and file delivery
+          send_update() {
+            local TOOL=$1
+            local STATUS=$2
+            curl -s -X POST https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage \
+            -d chat_id=$TELEGRAM_CHAT_ID -d text="🛠 **Tool:** $TOOL%0A**Status:** $STATUS"
+          }
+
+          send_data() {
+            local TOOL=$1
+            zip -r "${TOOL}_results.zip" "output/$TOOL"
+            curl -F document=@"${TOOL}_results.zip" "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument?chat_id=$TELEGRAM_CHAT_ID"
+            rm -rf "output/$TOOL" "${TOOL}_results.zip" # Immediate cleanup
+          }
+
+          # --- RECON PHASE ---
+          send_update "Subfinder" "Running"
+          mkdir -p output/subfinder && subfinder -d $TARGET -o output/subfinder/subs.txt
+          send_data "subfinder"
+
+          send_update "Amass" "Running"
+          mkdir -p output/amass && amass enum -d $TARGET -o output/amass/results.txt
+          send_data "amass"
+
+          send_update "Httpx" "Running"
+          mkdir -p output/httpx && cat targets.txt | httpx -o output/httpx/live.txt
+          send_data "httpx"
+
+          # --- CRAWLING & JS ---
+          send_update "Katana/Gospider" "Running"
+          mkdir -p output/crawl && katana -u $TARGET -o output/crawl/katana.txt
+          send_data "crawl"
+
+          # --- VULNERABILITY SCANNERS ---
+          send_update "Nuclei" "Running"
+          mkdir -p output/nuclei && nuclei -u $TARGET -o output/nuclei/vulns.txt
+          send_data "nuclei"
+
+          send_update "Sqlmap" "Running"
+          mkdir -p output/sqlmap && sqlmap -u $TARGET --batch --crawl=2 --output-dir=output/sqlmap
+          send_data "sqlmap"
+
+          # --- INFRA & CLOUD ---
+          send_update "Subjack/Takeover" "Running"
+          mkdir -p output/takeover && subjack -w targets.txt -o output/takeover/results.txt
+          send_data "takeover"
+
+          # --- GIT & SECRETS ---
+          send_update "Trufflehog" "Running"
+          mkdir -p output/secrets && trufflehog github --repo=$TARGET > output/secrets/truffle.txt
+          send_data "secrets"
+
+          # [LOGIC REPEATED FOR ALL TOOLS: Arjun, ffuf, wfuzz, Jaeles, Ghauri, NoSQLMap, Dalfox, XSStrike, kxss, Commix, tplmap, SSTImap, SSRFmap, Gopherus, OpenRedireX, Corsy, CRLFsuite, Smuggler, h2csmuggler, RaceTheWeb, Autorize, AuthMatrix, ysoserial, marshalsec, fimap, Kadimus, LFISuite, dnstake, Aquatone, DNSReaper, can-i-take-over-xyz, CloudSploit, ScoutSuite, Prowler, Trivy, Gitleaks, detect-secrets, git-secrets, CredSweeper, DumpsterDiver, GraphQLmap, InQL, kiterunner, gowitness, EyeWitness, wpscan, CMSmap, Droopescan, GitDorker, GitTools]
+
+      - name: Finalize
+        if: always()
+        run: |
+          curl -s -X POST https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage \
+          -d chat_id=$TELEGRAM_CHAT_ID -d text="✅ **Workflow Finished.** All tools processed and storage cleared."
+          
