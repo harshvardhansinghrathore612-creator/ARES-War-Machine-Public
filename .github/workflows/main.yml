@@ -1,11 +1,11 @@
 name: ARES War Machine - Manual Absolute 100%
 on:
-  workflow_dispatch: # Manual trigger only
+  workflow_dispatch:
 
 jobs:
   security-hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # 6-hour limit
+    timeout-minutes: 360
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -14,17 +14,15 @@ jobs:
 
       - name: "Full Global Installation & Environment Setup"
         run: |
-          # 1. CORE SYSTEM & DISPLAY FIX
+          # 1. SYSTEM SETUP
           sudo apt-get update
           sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev
           mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/sqlmap output/commix output/vulns output/specialized
           echo "$HOME/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-          # 2. DRIVE API DEPS
           pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-          # 3. INSTALL ALL GO TOOLS (Amass Removed)
+          # 2. INSTALL ALL TOOLS (No Amass)
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
@@ -39,7 +37,7 @@ jobs:
           go install -v github.com/tomnomnom/hacks/kxss@latest || true
           go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest || true
 
-          # 4. INSTALL ALL PYTHON/RUBY/TOOL REPOS
+          # 3. PYTHON/RUBY/TOOL REPOS
           sudo gem install wpscan || true
           pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap xsstrike openredirex waymore jsluice jwt_tool kiterunner tplmap sstimap ssrfmap corsy crlfsuite smuggler h2csmuggler racetheweb wpscan trivy dumpsterdiver credsweeper detect-secrets eyewitness || true
           
@@ -47,9 +45,7 @@ jobs:
           git clone https://github.com/1N3/LinkFinder.git $HOME/tools/LinkFinder && pip3 install -r $HOME/tools/LinkFinder/requirements.txt || true
           git clone https://github.com/tarunkant/Gopherus.git $HOME/tools/Gopherus || true
           git clone https://github.com/marlospasqualini/LFISuite.git $HOME/tools/LFISuite || true
-          git clone https://github.com/frohoff/ysoserial.git $HOME/tools/ysoserial || true
           git clone https://github.com/obheda12/GitDorker.git $HOME/tools/GitDorker || true
-          git clone https://github.com/internetwache/GitTools.git $HOME/tools/GitTools || true
           
           wget https://raw.githubusercontent.com/haccer/subjack/master/fingerprints.json -O $HOME/tools/fingerprints.json
           wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O $HOME/tools/common.txt
@@ -62,7 +58,7 @@ jobs:
         run: |
           TARGET=$(cat targets.txt | head -n 1)
           
-          # Ownership Transfer + Live Sync Uploader
+          # QUOTA-PROOF UPLOADER
           cat << 'EOF' > live_sync_drive.py
           import os, sys, json
           from google.oauth2 import service_account
@@ -73,10 +69,6 @@ jobs:
               creds = service_account.Credentials.from_service_account_info(json.loads(os.environ['GDRIVE_JSON']))
               return build('drive', 'v3', credentials=creds)
 
-          def transfer_ownership(service, file_id, user_email):
-              permission = {'type': 'user', 'role': 'writer', 'emailAddress': user_email, 'pendingOwner': True}
-              service.permissions().create(fileId=file_id, body=permission, transferOwnership=True, supportsAllDrives=True).execute()
-
           def get_or_create_folder(service, name, parent_id):
               query = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
               files = service.files().list(q=query, supportsAllDrives=True).execute().get('files', [])
@@ -85,70 +77,66 @@ jobs:
                   return service.files().create(body=body, fields='id', supportsAllDrives=True).execute().get('id')
               return files[0].get('id')
 
-          def upload(path, drive_parent_id, target_name, user_email):
+          def upload(path, drive_parent_id, target_name):
               service = get_service()
               target_folder = get_or_create_folder(service, target_name, drive_parent_id)
               
               if os.path.isfile(path):
                   media = MediaFileUpload(path, resumable=True)
-                  f = service.files().create(body={'name': os.path.basename(path), 'parents': [target_folder]}, media_body=media, supportsAllDrives=True, fields='id').execute()
-                  try: transfer_ownership(service, f['id'], user_email)
-                  except: pass
+                  # CRITICAL: supportsAllDrives=True bypasses the service account 0GB local check
+                  service.files().create(
+                      body={'name': os.path.basename(path), 'parents': [target_folder]},
+                      media_body=media,
+                      supportsAllDrives=True 
+                  ).execute()
               elif os.path.isdir(path):
                   tool_folder = get_or_create_folder(service, os.path.basename(path), target_folder)
                   for root, _, files in os.walk(path):
                       for file in files:
                           f_path = os.path.join(root, file)
                           media = MediaFileUpload(f_path, resumable=True)
-                          f = service.files().create(body={'name': file, 'parents': [tool_folder]}, media_body=media, supportsAllDrives=True, fields='id').execute()
-                          try: transfer_ownership(service, f['id'], user_email)
-                          except: pass
+                          service.files().create(
+                              body={'name': file, 'parents': [tool_folder]},
+                              media_body=media,
+                              supportsAllDrives=True
+                          ).execute()
           
           if __name__ == "__main__":
-              upload(sys.argv[1], sys.argv[2], sys.argv[3], os.environ['MY_EMAIL'])
+              upload(sys.argv[1], sys.argv[2], sys.argv[3])
           EOF
 
           send_msg() {
             curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d parse_mode="Markdown" -d text="$1"
           }
 
-          # --- FULL PIPELINE EXECUTION ---
-          send_msg "⚔️ *ARES Absolute Run Start:* \`$TARGET\`"
-
           # STAGE 1: RECON
+          send_msg "⚔️ *ARES Run Start:* \`$TARGET\`"
           subfinder -d $TARGET -o output/recon/subs.txt
           python3 live_sync_drive.py "output/recon/subs.txt" "$FOLDER_ID" "$TARGET"
           
-          # STAGE 2: VISUAL & PROBING
+          # STAGE 2: VISUAL
           httpx -l output/recon/subs.txt -o output/probing/live.txt
           xvfb-run gowitness file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
-          cat output/probing/live.txt | xvfb-run aquatone -out output/aquatone_report || true
           python3 live_sync_drive.py "output/probing" "$FOLDER_ID" "$TARGET"
           python3 live_sync_drive.py "output/screenshots" "$FOLDER_ID" "$TARGET"
 
-          # STAGE 3: CRAWLING & JS
+          # STAGE 3: CRAWLING
           katana -list output/probing/live.txt -o output/crawling/urls.txt
-          cat output/crawling/urls.txt | jsluice urls > output/crawling/js_endpoints.txt || true
-          python3 $HOME/tools/SecretFinder/SecretFinder.py -i $TARGET -e -o cli > output/secrets/secrets.txt || true
           python3 live_sync_drive.py "output/crawling" "$FOLDER_ID" "$TARGET"
-          python3 live_sync_drive.py "output/secrets" "$FOLDER_ID" "$TARGET"
 
           # STAGE 4: EXPLOITATION
           sqlmap -m output/crawling/urls.txt --batch --random-agent --level 1 --risk 1 --output-dir=output/sqlmap || true
-          commix --url-file=output/crawling/urls.txt --batch --output-dir=output/commix || true
           nuclei -l output/probing/live.txt -o output/vulns/nuclei_results.txt || true
           python3 live_sync_drive.py "output/sqlmap" "$FOLDER_ID" "$TARGET"
           python3 live_sync_drive.py "output/vulns" "$FOLDER_ID" "$TARGET"
           
           # STAGE 5: SPECIALIZED
           python3 $HOME/tools/GitDorker/GitDorker.py -t $TARGET -q $TARGET -o output/specialized/gitdorks.txt || true
-          jwt_tool -M pb -t $TARGET > output/specialized/jwt_scan.txt || true
-          python3 $HOME/tools/Gopherus/gopherus.py --exploit mysql --url $TARGET > output/specialized/gopherus.txt || true
           python3 live_sync_drive.py "output/specialized" "$FOLDER_ID" "$TARGET"
 
-      - name: "Final Notification"
+      - name: "Final Cleanup"
         if: always()
         run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d text="✅ **ARES Complete.** Check your Drive."
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d text="✅ **ARES Complete.** Check Drive."
           rm -rf output/
           
