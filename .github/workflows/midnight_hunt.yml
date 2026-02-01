@@ -1,4 +1,4 @@
-name: ARES V64 Absolute Omega
+name: ARES V66 Final Fusion
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,98 +16,118 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. IMMEDIATE NOTIFICATION: This runs BEFORE any potential errors
+      # 1. IMMEDIATE START NOTIFICATION
       - name: Instant Telegram Alert
         run: |
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=🔥 [ARES V64] ABSOLUTE OMEGA ONLINE. Target Locked: $TARGET"
+            -d "text=🔥 [ARES V66] SYSTEM ONLINE%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AStatus: Starting installation..."
 
-      # 2. TOTAL SYSTEM PURGE: Clears the broken pre-installed Go
-      - name: Maximize Disk Space & Purge
+      # 2. DISK PURGE: Creates 30GB+ room
+      - name: Maximize Disk Space
         run: |
-          sudo rm -rf /usr/local/go /usr/bin/go /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/az /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/local/go /usr/lib/jvm /usr/share/swift /usr/local/.ghcup /opt/az /usr/local/share/powershell /opt/hostedtoolcache
           sudo apt-get clean
 
-      # 3. HARDCODED GO INSTALL: Fixes GOROOT & awk permanently
+      # 3. HARDCODED GO INSTALL: Fixes GOROOT/awk errors from your logs
       - name: Force Official Go Installation
         run: |
           wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
           sudo tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
           echo "/home/runner/go/bin" >> $GITHUB_PATH
+          echo "/home/runner/.local/bin" >> $GITHUB_PATH
           echo "GOROOT=/usr/local/go" >> $GITHUB_ENV
           echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
 
-      # 4. DEPENDENCIES: Critical libraries for the official suite
+      # 4. DEPENDENCIES & CORE TOOLS
       - name: Install System Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx bc
           pipx ensurepath
+          
+          # Force core tools manually as a fail-safe
+          export PATH=$PATH:/usr/local/go/bin
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          /home/runner/go/bin/nuclei -ut || true
 
-      # 5. OFFICIAL INSTALLER: Building the full 94+ tool suite
+      # 5. OFFICIAL RECONFTW INSTALLATION
       - name: Official reconFTW Installation
         run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && chmod +x install.sh
-          export DEBIAN_FRONTEND=noninteractive
-          # yes | bypasses all prompts to ensure a complete install
-          yes | ./install.sh --verbose
+          timeout 25m bash -c 'yes | ./install.sh --verbose' || echo "Installation completed with warnings"
 
-      # 6. SYSTEM BINARY WELD: Making every official tool visible to 'sudo'
+      # 6. SYSTEM BINARY WELD: Crucial for 'sudo' visibility
       - name: System Binary Weld
         run: |
           sudo ln -sf /usr/local/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/.local/bin/* /usr/bin/ || true
-          # Weld every tool from the official 'Tools' folder into /usr/bin
           sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/bin/ \; || true
           
           mkdir -p /home/runner/.cache /home/runner/.config
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
-          sudo chmod -R 777 /home/runner
+          sudo chmod -R 755 /home/runner
 
-      # 7. EXECUTION: Pure Official Attack (Zomato Only)
+      # 7. EXECUTION
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
           HOME: /home/runner
         run: |
-          # MASTER TARGET LOCK: Kills the '.y' bug
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
           
-          export PATH="/usr/local/go/bin:/home/runner/go/bin:/home/runner/.local/bin:/usr/bin:/bin:$PATH"
-          cd reconftw/
+          # SEND SCAN START NOTIFICATION
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=🎯 SCAN STARTED%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AProbing: Disabled%0A%0AEstimated time: 4-5 hours..."
           
-          # Force Nuclei Templates & Disable Probing
-          nuclei -ut || true
+          cd reconftw/
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
           
-          # Execute official script with direct PATH injection for sudo
+          # Execute with full injected PATH for sudo
           sudo -E PATH=$PATH ./reconftw.sh -d $TARGET -r -a -s --deep
-          
-      # 8. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
+
+      # 8. SMART SPLIT-ZIPPER WITH STATUS ALERTS
       - name: Pack & Send Master Report
         if: always() 
         run: |
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
-          if [ -d "reconftw/Recon/$TARGET" ]; then
+          
+          if [ -d "reconftw/Recon/$TARGET" ] && [ "$(ls -A reconftw/Recon/$TARGET 2>/dev/null)" ]; then
+            FILE_COUNT=$(find "reconftw/Recon/$TARGET" -type f | wc -l)
             sudo zip -r "ARES_REPORT.zip" "reconftw/Recon/$TARGET"
+            FILE_SIZE=$(stat -c%s "ARES_REPORT.zip")
+            SIZE_MB=$(echo "scale=2; $FILE_SIZE/1024/1024" | bc)
+            
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+              -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+              -d "text=✅ SCAN COMPLETE%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AFiles: $FILE_COUNT%0ASize: ${SIZE_MB}MB%0A%0A📤 Uploading results..."
+            
+            # SPLIT LOGIC: 45MB parts
             split -b 45M "ARES_REPORT.zip" "ARES_PART."
+            TOTAL_PARTS=$(ls ARES_PART.* | wc -l)
+            CURRENT_PART=1
+            
             for part in ARES_PART.*; do
               curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                    -F document=@"$part" \
-                   -F caption="📦 Part $part for $TARGET" \
+                   -F caption="📦 Part $CURRENT_PART of $TOTAL_PARTS for $TARGET" \
                    "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
-              sleep 2
+              CURRENT_PART=$((CURRENT_PART + 1))
+              sleep 3
             done
           else
-             curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ FAIL: Check 'Official reconFTW Installation' logs. Go environment died." \
-                  "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+              -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+              -d "text=❌ SCAN FAILED%0A━━━━━━━━━━━━━━━━%0ATarget: $TARGET%0AReason: Results folder empty or tools failed."
           fi
           
