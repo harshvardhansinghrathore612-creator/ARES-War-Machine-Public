@@ -1,4 +1,4 @@
-name: ARES V63 Official Recon Master
+name: ARES V64 Absolute Omega
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,13 +16,21 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. TOTAL SYSTEM PURGE: No more residue or Go version fights
+      # 1. IMMEDIATE NOTIFICATION: This runs BEFORE any potential errors
+      - name: Instant Telegram Alert
+        run: |
+          TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=🔥 [ARES V64] ABSOLUTE OMEGA ONLINE. Target Locked: $TARGET"
+
+      # 2. TOTAL SYSTEM PURGE: Clears the broken pre-installed Go
       - name: Maximize Disk Space & Purge
         run: |
           sudo rm -rf /usr/local/go /usr/bin/go /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/az /opt/hostedtoolcache
           sudo apt-get clean
 
-      # 2. HARDCODED GO INSTALL: Fixes GOROOT & awk issues permanently
+      # 3. HARDCODED GO INSTALL: Fixes GOROOT & awk permanently
       - name: Force Official Go Installation
         run: |
           wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
@@ -32,22 +40,28 @@ jobs:
           echo "GOROOT=/usr/local/go" >> $GITHUB_ENV
           echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
 
-      # 3. OFFICIAL INSTALLER: Building the pure 94+ tool suite
-      - name: Official reconFTW Installation
+      # 4. DEPENDENCIES: Critical libraries for the official suite
+      - name: Install System Dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
+          pipx ensurepath
+
+      # 5. OFFICIAL INSTALLER: Building the full 94+ tool suite
+      - name: Official reconFTW Installation
+        run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && chmod +x install.sh
-          # yes | ensures the official installer gets everything without prompts
+          export DEBIAN_FRONTEND=noninteractive
+          # yes | bypasses all prompts to ensure a complete install
           yes | ./install.sh --verbose
 
-      # 4. THE WELD: Making every official tool visible to 'sudo'
+      # 6. SYSTEM BINARY WELD: Making every official tool visible to 'sudo'
       - name: System Binary Weld
         run: |
           sudo ln -sf /usr/local/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/.local/bin/* /usr/bin/ || true
-          # Physical links for every tool downloaded by the official installer
+          # Weld every tool from the official 'Tools' folder into /usr/bin
           sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/bin/ \; || true
           
           mkdir -p /home/runner/.cache /home/runner/.config
@@ -55,33 +69,28 @@ jobs:
           sudo ln -sf /home/runner/.config /.config
           sudo chmod -R 777 /home/runner
 
-      # 5. EXECUTION: The Pure Official Attack (Zomato Only)
+      # 7. EXECUTION: Pure Official Attack (Zomato Only)
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
           HOME: /home/runner
         run: |
-          # MASTER TARGET LOCK: Kills the '.y' bug by scrubbing the targets.txt file
+          # MASTER TARGET LOCK: Kills the '.y' bug
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
-          
-          # Telegram Start Message
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=🔥 [ARES V63] OFFICIAL SCAN STARTING: $TARGET"
           
           export PATH="/usr/local/go/bin:/home/runner/go/bin:/home/runner/.local/bin:/usr/bin:/bin:$PATH"
           cd reconftw/
           
-          # Pure Official Config
+          # Force Nuclei Templates & Disable Probing
           nuclei -ut || true
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
           
-          # The official command for single target
+          # Execute official script with direct PATH injection for sudo
           sudo -E PATH=$PATH ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 6. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
+      # 8. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
       - name: Pack & Send Master Report
         if: always() 
         run: |
@@ -98,7 +107,7 @@ jobs:
             done
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ FAIL: Check 'Official reconFTW Installation' logs. Toolchain failed." \
+                  -F text="❌ FAIL: Check 'Official reconFTW Installation' logs. Go environment died." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
           
