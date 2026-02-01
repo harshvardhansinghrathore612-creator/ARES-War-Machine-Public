@@ -1,4 +1,4 @@
-name: ARES V58 Absolute Finality
+name: ARES V60 Absolute Finality
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -16,87 +16,82 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. TOTAL PURGE: Kills pre-installed Go to prevent the GOROOT error
+      # 1. TOTAL SYSTEM PURGE: No more fighting with pre-installed Go
       - name: Maximize Disk Space & Purge
         run: |
-          sudo rm -rf /usr/local/go /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/az /opt/hostedtoolcache
+          sudo rm -rf /usr/local/go /usr/bin/go /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/az /opt/hostedtoolcache
           sudo apt-get clean
 
-      # 2. HARDCODED GO INSTALL: Fixes the 'awk' and 'GOROOT' issues for good
+      # 2. HARDCODED GO INSTALL: Fixes GOROOT & awk issues permanently
       - name: Force Official Go Installation
         run: |
           wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
           sudo tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz
-          # WELDING: Lock the paths into the global system brain
           echo "/usr/local/go/bin" >> $GITHUB_PATH
           echo "/home/runner/go/bin" >> $GITHUB_PATH
           echo "GOROOT=/usr/local/go" >> $GITHUB_ENV
           echo "GOPATH=/home/runner/go" >> $GITHUB_ENV
 
-      - name: Telegram Handshake
+      # 3. CORE 4 FORCE: Manual install of the tools that MUST exist
+      - name: Force Master Tools
         run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=🚀 [ARES V58] God-Mode Finality Online. Target: $(cat targets.txt)"
+          export PATH=$PATH:/usr/local/go/bin
+          go install -v github.com/tomnomnom/anew@latest
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          sudo cp /home/runner/go/bin/* /usr/bin/
 
-      # 3. DEPENDENCIES: Critical libraries for Arjun, Ghauri, and more
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev libxml2-dev libxslt1-dev python3-pip python3-dev zip pipx
-          pipx ensurepath
-
-      # 4. THE OFFICIAL INSTALLER: Running the full 94+ tool suite
       - name: Official reconFTW Installation
         run: |
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/ && chmod +x install.sh
-          # Forces 'yes' to every prompt to ensure full install
           yes | ./install.sh --verbose
 
-      # 5. THE BINARY WELD: Making everything visible to sudo
+      # 4. THE BINARY WELD: Making everything visible to 'sudo'
       - name: System Binary Weld
         run: |
           sudo ln -sf /usr/local/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/go/bin/* /usr/bin/ || true
           sudo ln -sf /home/runner/.local/bin/* /usr/bin/ || true
-          # Recurse into Tools folder to find Arjun, Ghauri, etc.
           sudo find /home/runner/Tools -executable -type f -exec ln -sf {} /usr/bin/ \; || true
-          
-          # Fix Permission Denied & Cache Errors
           mkdir -p /home/runner/.cache /home/runner/.config
           sudo ln -sf /home/runner/.cache /.cache
           sudo ln -sf /home/runner/.config /.config
           sudo chmod -R 777 /home/runner
 
-      # 6. EXECUTION: Total Path Dominance (No Probing)
+      # 5. EXECUTION: The .y Bug Fix & Attack
       - name: Execute Full Attack Suite
         timeout-minutes: 310
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
           HOME: /home/runner
         run: |
-          TARGET=$(cat targets.txt)
+          # The 'tr' command kills hidden characters that cause the ".y" bug
+          TARGET=$(cat targets.txt | tr -d '\r' | xargs)
           export PATH="/usr/local/go/bin:/home/runner/go/bin:/home/runner/.local/bin:/usr/bin:/bin:$PATH"
           cd reconftw/
           
-          # Fix Nuclei Templates
-          nuclei -ut || true
+          # Telegram Start Notification
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=🔥 [ARES V60] ATTACK STARTING: $TARGET"
           
-          # Disable Probing as requested
+          # Force Nuclei Templates & Disable Probing
+          nuclei -ut || true
           sed -i 's/WEBPROBEFULL=true/WEBPROBEFULL=false/g' reconftw.cfg
           sed -i 's/WEBPROBESIMPLE=true/WEBPROBESIMPLE=false/g' reconftw.cfg
           
-          # Execute with direct PATH injection for sudo
           sudo -E PATH=$PATH ./reconftw.sh -d $TARGET -r -a -s --deep
           
-      # 7. SPLIT-ZIPPER: Bypasses Telegram 50MB Limit
+      # 6. SPLIT-ZIPPER: Telegram 50MB Bypass
       - name: Pack & Send Master Report
         if: always() 
         run: |
-          TARGET=$(cat targets.txt)
+          TARGET=$(cat targets.txt | tr -d '\r' | xargs)
           if [ -d "reconftw/Recon/$TARGET" ]; then
-            sudo zip -r "ARES_FINAL_REPORT.zip" "reconftw/Recon/$TARGET"
-            split -b 45M "ARES_FINAL_REPORT.zip" "ARES_PART."
+            sudo zip -r "ARES_REPORT.zip" "reconftw/Recon/$TARGET"
+            split -b 45M "ARES_REPORT.zip" "ARES_PART."
             for part in ARES_PART.*; do
               curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                    -F document=@"$part" \
@@ -106,7 +101,7 @@ jobs:
             done
           else
              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                  -F text="❌ FAIL: Check 'Manual Go Installation' log. Go environment is likely still broken." \
+                  -F text="❌ FAIL: No results for $TARGET." \
                   "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage"
           fi
           
