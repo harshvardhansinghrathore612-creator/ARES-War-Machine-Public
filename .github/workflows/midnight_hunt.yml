@@ -1,4 +1,4 @@
-name: ARES V80 TRUE ARSENAL
+name: ARES V81 THE FINAL STAND
 on:
   workflow_dispatch: 
 
@@ -15,13 +15,12 @@ jobs:
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=💀 [ARES V80] TRUE ARSENAL ONLINE%0A━━━━━━━━━━━━━━━━%0A🎯 Target: $TARGET%0A🔥 MODE: DEEP YOLO ATTACK (All Tools Forced)"
+            -d "text=⚡ [ARES V81] FINAL STAND ONLINE%0A━━━━━━━━━━━━━━━━%0A🎯 Target: $TARGET%0A🔥 MODE: DEEP YOLO ATTACK (Tests Killed)"
           
-          # Space purge
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/go /opt/az /opt/hostedtoolcache
           sudo apt-get clean
 
-      - name: Force Go & Official Install (Tests Killed)
+      - name: Force Go & Official Install
         run: |
           wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
           sudo tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz
@@ -29,7 +28,7 @@ jobs:
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/
           
-          # KILLING THE .y TESTS FOREVER
+          # KILLING THE .y TESTS
           sed -i '/subfinder -d .y/d' install.sh
           sed -i '/assetfinder .y/d' install.sh
           sed -i '/amass enum -d .y/d' install.sh
@@ -43,7 +42,7 @@ jobs:
           GH_TOKENS: ${{ secrets.GIT_PAT }}
         run: |
           cd reconftw/
-          # 1. Force every single module to TRUE in the config
+          # FORCE ALL MODULES TO TRUE
           sed -i 's/OSINT=false/OSINT=true/g' reconftw.cfg
           sed -i 's/VULNS_GENERAL=false/VULNS_GENERAL=true/g' reconftw.cfg
           sed -i 's/WEBPROBEFULL=false/WEBPROBEFULL=true/g' reconftw.cfg
@@ -51,10 +50,8 @@ jobs:
           sed -i 's/FUZZ=false/FUZZ=true/g' reconftw.cfg
           sed -i 's/PASSIVE=false/PASSIVE=true/g' reconftw.cfg
           sed -i 's/S3BUCKETS=false/S3BUCKETS=true/g' reconftw.cfg
-          sed -i 's/ZONETRANSFER=false/ZONETRANSFER=true/g' reconftw.cfg
           
-          # 2. Inject GitHub Tokens for GitDorking
-          # Make sure your secret "GIT_PAT" has your tokens (one per line)
+          # Inject GitHub Tokens
           echo "$GH_TOKENS" > /home/runner/Tools/.github_tokens
 
       - name: THE BINARY WELD
@@ -76,7 +73,7 @@ jobs:
           SENT_DIR="$GITHUB_WORKSPACE/Sent_Buffer"
           mkdir -p "$SENT_DIR"
 
-          # BACKGROUND STREAMER: Sends a ZIP of NEW findings every 45MB
+          # BACKGROUND STREAMER:
           (
             while true; do
               if [ -d "$RECON_DIR" ] && [ "$(du -sm "$RECON_DIR" | awk '{print $1}')" -ge 45 ]; then
@@ -84,7 +81,6 @@ jobs:
                 sudo zip -r "ARES_NEW_$TS.zip" "$RECON_DIR" -x "*.log*"
                 curl -F chat_id="$TELEGRAM_CHAT_ID" -F document=@"ARES_NEW_$TS.zip" \
                      -F caption="📦 45MB BURST: New Findings for $TARGET" "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument"
-                # Move files out so they aren't sent again
                 sudo rsync -a --remove-source-files "$RECON_DIR/" "$SENT_DIR/"
                 rm "ARES_NEW_$TS.zip"
               fi
@@ -93,14 +89,12 @@ jobs:
           ) &
 
           cd reconftw/
-          # YOLO MODE: -a (Everything)
           sudo -E PATH=$PATH ./reconftw.sh -d $TARGET -a --deep
 
       - name: Final Delivery
         if: always()
         run: |
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
-          # Merge leftovers and send final complete ZIP
           sudo mv $GITHUB_WORKSPACE/Sent_Buffer/* "reconftw/Recon/$TARGET/" || true
           sudo zip -r "FINAL_REPORT.zip" "reconftw/Recon/$TARGET"
           split -b 45M "FINAL_REPORT.zip" "PART."
