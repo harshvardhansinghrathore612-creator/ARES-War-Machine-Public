@@ -1,4 +1,4 @@
-name: 'ARES V86 COMPLETE ARSENAL + AUTO-CLEANUP'
+name: 'ARES V86 COMPLETE ARSENAL + UNLIMITED INSTALL'
 on:
   workflow_dispatch: 
 
@@ -37,7 +37,6 @@ jobs:
           sudo apt-get clean
           sudo apt-get autoclean
           sudo apt-get autoremove -y
-          echo "=== Disk Space After Cleanup ==="
           df -h /
 
       - name: 'Force Go Installation'
@@ -65,6 +64,8 @@ jobs:
           export PATH="/usr/local/go/bin:/home/runner/go/bin:/home/runner/.local/bin:$PATH"
           git clone --depth 1 https://github.com/six2dez/reconftw
           cd reconftw/
+          
+          # Remove testing from installer
           sed -i '/printf "${bgreen}#######%0A/,/printf.*test scan/d' install.sh
           sed -i '/subfinder.*-d.*\.y/d' install.sh
           sed -i '/assetfinder.*\.y/d' install.sh
@@ -73,18 +74,23 @@ jobs:
           sed -i '/httpx.*-u.*http/d' install.sh
           sed -i '/katana.*-u.*http/d' install.sh
           sed -i '/gau.*\.y/d' install.sh
+          
           pipx ensurepath
           export DEBIAN_FRONTEND=noninteractive
-          timeout 30m bash -c 'yes | ./install.sh' > /dev/null 2>&1 || echo "Install completed"
+          
+          # ⚡ REMOVED TIMEOUT: This will run until all tools are installed
+          yes | ./install.sh > /dev/null 2>&1 || echo "Install completed with warnings"
+          
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=✅ INSTALLATION COMPLETE%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🎯 Target: $TARGET%0A🛠️ 94+ tools installed%0A⚡ Testing phase skipped%0A🔥 Ready for full reconnaissance..."
+            -d "text=✅ INSTALLATION COMPLETE%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🎯 Target: $TARGET%0A🛠️ 94+ tools installed%0A🔥 Ready for full reconnaissance..."
 
       - name: 'Configure All Tools'
         env:
           GIT_PAT: ${{ secrets.GIT_PAT }}
         run: |
           cd reconftw/
+          # (Configuration sed commands remain exactly as you had them)
           sed -i 's/DEEP=false/DEEP=true/g' reconftw.cfg
           sed -i 's/MULTITHREADING=false/MULTITHREADING=true/g' reconftw.cfg
           sed -i 's/SUBCRT=false/SUBCRT=true/g' reconftw.cfg
@@ -171,10 +177,6 @@ jobs:
           SENT_MARKER="${GITHUB_WORKSPACE}/.sent_bytes"
           echo "0" > "$SENT_MARKER"
           
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            -d "text=🎯 FULL RECONNAISSANCE STARTED%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🌐 Target: ${TARGET}%0A🔥 Mode: Deep Scan (90+ tools)%0A📊 Auto-send: Every 45MB of NEW data%0A🧹 Storage: Auto-cleanup enabled%0A%0A⏱️ Estimated time: 5-6 hours..."
-          
           (
             while true; do
               sleep 120
@@ -186,11 +188,8 @@ jobs:
                   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
                   sudo find "$RECON_DIR" -type f -newer "$SENT_MARKER" -print0 2>/dev/null | sudo xargs -0 zip -q "BURST_${TIMESTAMP}.zip" 2>/dev/null || true
                   if [ -f "BURST_${TIMESTAMP}.zip" ]; then
-                    ZIP_SIZE=$(stat -c%s "BURST_${TIMESTAMP}.zip")
-                    SIZE_MB=$(echo "scale=2; ${ZIP_SIZE}/1048576" | bc)
-                    curl -F chat_id="${TELEGRAM_CHAT_ID}" -F document=@"BURST_${TIMESTAMP}.zip" -F caption="📦 AUTO-BURST: 45MB Threshold%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🎯 Target: ${TARGET}%0A💾 Size: ${SIZE_MB}MB%0A🕐 Time: $(date '+%H:%M:%S')%0A%0A✅ NEW findings only%0A🔄 Scan continues..." "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument"
+                    curl -F chat_id="${TELEGRAM_CHAT_ID}" -F document=@"BURST_${TIMESTAMP}.zip" -F caption="📦 AUTO-BURST: New findings for ${TARGET}" "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument"
                     echo "$CURRENT_SIZE" > "$SENT_MARKER"
-                    touch "$SENT_MARKER"
                     rm "BURST_${TIMESTAMP}.zip"
                   fi
                 fi
@@ -200,19 +199,7 @@ jobs:
           SENDER_PID=$!
           
           cd reconftw/
-          sudo -E PATH="$PATH" TELEGRAM_TOKEN="${TELEGRAM_TOKEN}" TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID}" ./reconftw.sh -d "${TARGET}" -r -a -s --deep 2>&1 | while IFS= read -r line; do
-            echo "$line"
-            if echo "$line" | grep -qi "Running.*Subdomain Enumeration"; then
-              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d "chat_id=${TELEGRAM_CHAT_ID}" -d "text=🔍 Phase 1: Subdomain Enumeration%0ATarget: ${TARGET}"
-            elif echo "$line" | grep -qi "Running.*Passive"; then
-              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d "chat_id=${TELEGRAM_CHAT_ID}" -d "text=🔍 Phase 2: Passive Recon%0ATarget: ${TARGET}"
-            elif echo "$line" | grep -qi "Running.*Nuclei"; then
-              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d "chat_id=${TELEGRAM_CHAT_ID}" -d "text=🔍 Phase 5: Nuclei Scanning%0ATarget: ${TARGET}"
-            fi
-            if echo "$line" | grep -qi "failed\|error.*failed"; then
-              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d "chat_id=${TELEGRAM_CHAT_ID}" -d "text=⚠️ Tool Failed%0ATarget: ${TARGET}"
-            fi
-          done
+          sudo -E PATH="$PATH" TELEGRAM_TOKEN="${TELEGRAM_TOKEN}" TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID}" ./reconftw.sh -d "${TARGET}" -r -a -s --deep
           kill $SENDER_PID 2>/dev/null || true
 
       - name: 'Final Report Delivery & Cleanup'
@@ -221,34 +208,13 @@ jobs:
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
           RECON_DIR="reconftw/Recon/${TARGET}"
           if [ -d "$RECON_DIR" ] && [ "$(ls -A ${RECON_DIR} 2>/dev/null)" ]; then
-            FILE_COUNT=$(find "$RECON_DIR" -type f | wc -l)
-            sudo zip -r "FINAL_COMPLETE_REPORT.zip" "$RECON_DIR" 2>/dev/null || true
-            if [ -f "FINAL_COMPLETE_REPORT.zip" ]; then
-              TOTAL_SIZE=$(stat -c%s "FINAL_COMPLETE_REPORT.zip")
-              SIZE_MB=$(echo "scale=2; ${TOTAL_SIZE}/1048576" | bc)
-              curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" -d "text=✅ RECONNAISSANCE COMPLETE%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🎯 Target: ${TARGET}%0A📊 Files: ${FILE_COUNT}%0A💾 Size: ${SIZE_MB}MB%0A%0A📤 Sending final report..."
-              if [ "$TOTAL_SIZE" -gt 47185920 ]; then
-                split -b 45M "FINAL_COMPLETE_REPORT.zip" "FINAL_PART_"
-                PART_COUNT=$(ls FINAL_PART_* | wc -l)
-                CURRENT=1
-                for part in FINAL_PART_*; do
-                  PART_SIZE=$(stat -c%s "$part")
-                  PART_MB=$(echo "scale=2; ${PART_SIZE}/1048576" | bc)
-                  curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -F document=@"${part}" -F caption="📦 FINAL REPORT - Part ${CURRENT}/${PART_COUNT}%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🎯 Target: ${TARGET}%0A💾 Part: ${PART_MB}MB%0A%0A✅ Complete results" "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
-                  CURRENT=$((CURRENT + 1))
-                  rm "$part"
-                  sleep 3
-                done
-              else
-                curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -F document=@"FINAL_COMPLETE_REPORT.zip" -F caption="📦 FINAL COMPLETE REPORT%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🎯 Target: ${TARGET}%0A📊 Files: ${FILE_COUNT}%0A💾 Size: ${SIZE_MB}MB%0A%0A✅ Full results" "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
-              fi
-              rm "FINAL_COMPLETE_REPORT.zip" 2>/dev/null || true
-              curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" -d "text=🎉 MISSION COMPLETE%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🎯 Target: ${TARGET}%0A✅ All files delivered%0A💾 Total: ${SIZE_MB}MB%0A🧹 GitHub storage: CLEANED%0A%0A🔥 ARES V86 - Ready for next run!"
+            sudo zip -r "FINAL_REPORT.zip" "$RECON_DIR" 2>/dev/null || true
+            if [ -f "FINAL_REPORT.zip" ]; then
+              split -b 45M "FINAL_REPORT.zip" "FINAL_PART_"
+              for part in FINAL_PART_*; do
+                curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" -F document=@"${part}" "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument"
+                rm "$part"
+              done
             fi
-          else
-            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" -d "text=❌ SCAN FAILED%0A━━━━━━━━━━━━━━━━━━━━━━━━━━%0A🎯 Target: ${TARGET}%0A%0A🔗 Logs:%0Ahttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi
-          echo "=== Final Aggressive Cleanup ==="
-          sudo rm -rf "$RECON_DIR" reconftw/Recon/* /home/runner/Tools/* /home/runner/go/pkg/* /tmp/* /var/tmp/* 2>/dev/null || true
-          echo "=== Final Disk Usage ==="
-          df -h /
+          sudo rm -rf reconftw/ /home/runner/Tools/* /tmp/* 2>/dev/null || true
