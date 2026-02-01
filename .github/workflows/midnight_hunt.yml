@@ -1,4 +1,4 @@
-name: ARES V70 Absolute Monitor
+name: ARES V71 Absolute Fix
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -17,12 +17,12 @@ jobs:
         uses: actions/checkout@v4
 
       # 1. THE SIGNAL: Instant confirmation that the machine is alive
-      - name: Telegram: System Wake-Up
+      - name: Telegram System Wake-Up
         run: |
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=⚡ [ARES V70] MONITOR ONLINE%0A━━━━━━━━━━━━━━━━%0A🎯 Target: $TARGET%0A🏗️ Phase: System Initialization..."
+            -d "text=⚡ [ARES V71] MONITOR ONLINE%0A━━━━━━━━━━━━━━━━%0A🎯 Target: $TARGET%0A🏗️ Phase: System Initialization..."
 
       # 2. THE PURGE: Creating room for the heavy tools
       - name: Maximize Disk Space
@@ -83,7 +83,6 @@ jobs:
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             -d "text=🚀 [Phase 3/3] FULL ATTACK STARTED: $TARGET%0A━━━━━━━━━━━━━━━━%0AEstimated time: 4-5 hours."
           
-          # FORCE: Re-enabling probing so the scan actually does work
           nuclei -ut || true
           sed -i 's/WEBPROBEFULL=false/WEBPROBEFULL=true/g' reconftw.cfg
           sed -i 's/NUCLEICHECK=false/NUCLEICHECK=true/g' reconftw.cfg
@@ -94,7 +93,7 @@ jobs:
             -d "text=💀 Vulnerability Checks Completed for $TARGET. Packing Report..."
 
       # 7. SMART SPLIT-ZIPPER: Sending every part of the real scan
-      - name: Pack & Send Master Report
+      - name: Pack Send Master Report
         if: always() 
         run: |
           TARGET=$(grep -v '^#' targets.txt | tr -d '\r' | xargs | awk '{print $1}')
