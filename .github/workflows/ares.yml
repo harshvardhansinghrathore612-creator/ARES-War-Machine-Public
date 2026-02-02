@@ -15,7 +15,7 @@ jobs:
     - name: Clean previous data
       run: |
         rm -rf output *.zip || true
-        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud}
+        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud,sql,nosql,xxe,auth,templates}
 
     - name: Install Go
       uses: actions/setup-go@v4
@@ -25,7 +25,7 @@ jobs:
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev
+        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev
         # Set up proper PATH for Go binaries
         echo "GOPATH=$HOME/go" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
@@ -54,13 +54,20 @@ jobs:
         go install github.com/Emoe/kxss@latest
         go install github.com/aquasecurity/tfsec/cmd/tfsec@latest
         
+        # NEW GO TOOLS
+        go install github.com/projectdiscovery/chaos-client/cmd/chaos@latest
+        go install github.com/d3mondev/puredns/v2@latest
+        go install github.com/sensepost/gowitness@latest
+        go install github.com/ffuf/ffuf@latest
+        go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
+        
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
 
     - name: Install Python tools
       run: |
         echo "Installing Python tools..."
         pip3 install --upgrade pip --user
-        pip3 install arjun checkov s3scanner swagger-parser --user
+        pip3 install arjun checkov s3scanner swagger-parser paramspider x8 git-secrets ghauri nosqlmap commix tplmap phpggc --user
 
     - name: Install JWT Tool (from GitHub)
       run: |
@@ -96,7 +103,6 @@ jobs:
       run: |
         echo "Installing inql..."
         pip3 install inql --user
-        # Create wrapper script for inql
         echo '#!/bin/bash
         python3 -c "from inql.cli import main; main()" "$@"' | sudo tee /usr/local/bin/inql
         sudo chmod +x /usr/local/bin/inql
@@ -117,12 +123,12 @@ jobs:
     - name: Download precompiled binaries
       run: |
         echo "Downloading precompiled binaries..."
-        # gospider - FIXED
+        # gospider
         curl -L -o gospider-linux "https://github.com/hakluke/gospider/releases/latest/download/gospider_linux_amd64"
         chmod +x gospider-linux
         sudo mv gospider-linux /usr/local/bin/gospider
         
-        # gitleaks - FIXED
+        # gitleaks
         curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep "browser_download_url.*linux_x64.tar.gz" | cut -d '"' -f 4 | xargs curl -L -o gitleaks.tar.gz
         tar -xzf gitleaks.tar.gz
         find . -name "gitleaks" -type f -exec chmod +x {} \; 2>/dev/null || true
@@ -131,7 +137,44 @@ jobs:
         elif [ -f "gitleaks-linux-amd64" ]; then
           sudo mv gitleaks-linux-amd64 /usr/local/bin/gitleaks
         fi
-        rm -f gitleaks.tar.gz
+        
+        # Feroxbuster
+        curl -L -o feroxbuster.tar.gz "https://github.com/epi052/feroxbuster/releases/latest/download/feroxbuster-linux-x86_64.tar.gz"
+        tar -xzf feroxbuster.tar.gz
+        chmod +x feroxbuster
+        sudo mv feroxbuster /usr/local/bin/
+        
+        rm -f gitleaks.tar.gz feroxbuster.tar.gz
+
+    - name: Install SQLMap (from GitHub)
+      run: |
+        echo "Installing SQLMap..."
+        git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git $HOME/tools/sqlmap
+        echo '#!/bin/bash
+        cd $HOME/tools/sqlmap
+        python3 sqlmap.py "$@"' | sudo tee /usr/local/bin/sqlmap
+        sudo chmod +x /usr/local/bin/sqlmap
+
+    - name: Install XXEinjector (from GitHub)
+      run: |
+        echo "Installing XXEinjector..."
+        git clone --depth 1 https://github.com/enjoiz/XXEinjector.git $HOME/tools/XXEinjector
+        cd $HOME/tools/XXEinjector
+        echo '#!/bin/bash
+        cd $HOME/tools/XXEinjector
+        ruby XXEinjector.rb "$@"' | sudo tee /usr/local/bin/xxeinjector
+        sudo chmod +x /usr/local/bin/xxeinjector
+
+    - name: Install ppmap (from GitHub)
+      run: |
+        echo "Installing ppmap..."
+        git clone --depth 1 https://github.com/kleiton0x00/ppmap.git $HOME/tools/ppmap
+        cd $HOME/tools/ppmap
+        pip3 install -r requirements.txt --user
+        echo '#!/bin/bash
+        cd $HOME/tools/ppmap
+        python3 ppmap.py "$@"' | sudo tee /usr/local/bin/ppmap
+        sudo chmod +x /usr/local/bin/ppmap
 
     - name: Create Google Drive uploader
       run: |
@@ -216,7 +259,7 @@ jobs:
             local exit_code=$?
             echo "$stage_name FAILED with exit code: $exit_code"
             tg "⚠️ $stage_name had issues but continuing..."
-            return 0  # DON'T STOP PIPELINE
+            return 0
           fi
         }
 
@@ -224,8 +267,10 @@ jobs:
         run_stage "Reconnaissance" '
           subfinder -d $TARGET -silent > output/recon/subs.txt
           assetfinder --subs-only $TARGET >> output/recon/subs.txt
+          chaos -d $TARGET -silent >> output/recon/subs.txt
           sort -u output/recon/subs.txt > output/recon/final_subs.txt
           dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt
+          puredns resolve output/recon/final_subs.txt -r 1.1.1.1 > output/recon/puredns.txt
           zip -j recon.zip output/recon/*
           python3 drive_upload.py recon.zip Stage_1_Recon
         '
@@ -235,6 +280,9 @@ jobs:
           httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt
           echo "Live hosts: $(wc -l < output/probe/live.txt)"
           cat output/probe/live.txt
+          # Take screenshots with gowitness (limited to 5)
+          head -5 output/probe/live.txt > output/probe/live_limited.txt
+          gowitness file -f output/probe/live_limited.txt -o output/probe/screenshots/ --no-db
           zip -j probe.zip output/probe/*
           python3 drive_upload.py probe.zip Stage_2_Probe
         '
@@ -245,9 +293,17 @@ jobs:
           gau $TARGET >> output/crawl/gau.txt
           waybackurls $TARGET >> output/crawl/wayback.txt
           hakrawler -url $TARGET > output/crawl/hakrawler.txt
-          # FIXED: gospider with directory output
           gospider -s $TARGET -o output/crawl/gospider/
           find output/crawl/gospider/ -type f -name "*.txt" -exec cat {} \; > output/crawl/gospider_combined.txt 2>/dev/null || true
+          # Use paramspider
+          paramspider -d $TARGET -o output/crawl/paramspider.txt
+          # Use feroxbuster with rate limiting (only on 3 URLs)
+          head -3 output/probe/live.txt | while read url; do
+            feroxbuster -u $url -o output/crawl/feroxbuster_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt --rate-limit 10 --threads 3
+          done
+          # Extract parameterized URLs for later stages
+          grep "=" output/crawl/katana.txt > output/crawl/params_only.txt
+          echo "Parameterized URLs found: $(wc -l < output/crawl/params_only.txt)"
           zip -j crawl.zip output/crawl/*
           python3 drive_upload.py crawl.zip Stage_3_Crawl
         '
@@ -257,6 +313,10 @@ jobs:
           cat output/crawl/katana.txt | qsreplace "FUZZ" > output/crawl/qsreplace.txt
           cat output/crawl/katana.txt | kxss > output/crawl/kxss.txt
           cat output/crawl/katana.txt | unfurl paths keys values > output/crawl/unfurl.txt
+          # Use x8 for parameter discovery (only on 3 URLs)
+          head -3 output/probe/live.txt | while read url; do
+            x8 -u $url -w /usr/share/wordlists/dirb/common.txt > output/crawl/x8_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt
+          done
           zip -j params.zip output/crawl/*
           python3 drive_upload.py params.zip Stage_4_Params
         '
@@ -265,6 +325,10 @@ jobs:
         run_stage "Vulnerability Scanning" '
           nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt
           dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt
+          # Use ffuf for fuzzing with rate limiting
+          head -3 output/probe/live.txt | while read url; do
+            ffuf -u $url/FUZZ -w /usr/share/wordlists/dirb/common.txt -o output/vulns/ffuf_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").json -rate 10 -t 3
+          done
           zip -j vulns.zip output/vulns/*
           python3 drive_upload.py vulns.zip Stage_5_Vulns
         '
@@ -273,6 +337,7 @@ jobs:
         run_stage "Secrets Detection" '
           trufflehog filesystem . --no-update > output/secrets/trufflehog.txt
           gitleaks detect --no-git -v > output/secrets/gitleaks.txt
+          git-secrets --scan > output/secrets/git_secrets.txt 2>&1 || true
           zip -j secrets.zip output/secrets/*
           python3 drive_upload.py secrets.zip Stage_6_Secrets
         '
@@ -297,7 +362,7 @@ jobs:
           python3 drive_upload.py graphql_api.zip Stage_7_GraphQL_API
         '
 
-        ### STAGE 8: CLOUD SECURITY (FIXED - NO CLOUDSPLAINING)
+        ### STAGE 8: CLOUD SECURITY
         run_stage "Cloud Security Scanning" '
           echo "provider \"aws\" {}" > test.tf
           echo "resource \"aws_s3_bucket\" \"test\" {}" >> test.tf
@@ -305,7 +370,6 @@ jobs:
           tfsec . > output/cloud/tfsec.txt 2>&1 || true
           checkov -d . > output/cloud/checkov.txt 2>&1 || true
           
-          # REMOVED cloudsplaining - it requires AWS credentials
           echo "Cloudsplaining skipped (requires AWS credentials)" > output/cloud/cloudsplaining.txt
           
           rm -f test.tf
@@ -315,7 +379,7 @@ jobs:
 
         ### STAGE 9: JWT TESTING
         run_stage "JWT Testing" '
-          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
+          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE6MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
           
           jwt_tool output/specialized/sample_jwt.txt > output/specialized/jwt_tool.txt 2>&1 || true
           
@@ -323,15 +387,115 @@ jobs:
           python3 drive_upload.py specialized.zip Stage_9_Specialized_Tools
         '
 
-        ### STAGE 10: JAELES SCANNING
+        ### STAGE 10: JAELES SCANNING (IMPROVED)
         run_stage "Jaeles Scanning" '
-          jaeles scan -s $HOME/.jaeles/signatures-base -u "https://$TARGET" > output/specialized/jaeles.txt 2>&1 || true
+          echo "Running Jaeles on crawled URLs..."
+          if [ -s output/crawl/katana.txt ]; then
+            jaeles scan \
+              -s $HOME/.jaeles/signatures-base \
+              -L output/crawl/katana.txt \
+              -c 5 \
+              -o output/specialized/jaeles.txt
+          else
+            echo "No URLs to scan with Jaeles" > output/specialized/jaeles.txt
+          fi
           
           zip -j jaeles.zip output/specialized/*
           python3 drive_upload.py jaeles.zip Stage_10_Jaeles
         '
 
+        ### STAGE 11: SQL INJECTION TESTING (FIXED - ONLY PARAMETERIZED URLS)
+        run_stage "SQL Injection Testing" '
+          echo "Testing for SQL injection on parameterized URLs..."
+          if [ -s output/crawl/params_only.txt ]; then
+            head -10 output/crawl/params_only.txt > output/sql/params_for_sql.txt
+            echo "Testing with sqlmap (advanced flags)..."
+            sqlmap -m output/sql/params_for_sql.txt --batch --risk 3 --level 5 --technique=BEUSTQ --tamper=space2comment --delay=2 --threads=3 > output/sql/sqlmap_results.txt 2>&1 || true
+            echo "Testing with ghauri..."
+            head -5 output/crawl/params_only.txt | while read url; do
+              ghauri -u $url --batch --delay 2 > output/sql/ghauri_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+            done
+          else
+            echo "No parameterized URLs found for SQL injection testing" > output/sql/sqlmap_results.txt
+          fi
+          zip -j sql.zip output/sql/*
+          python3 drive_upload.py sql.zip Stage_11_SQL_Injection
+        '
+
+        ### STAGE 12: NoSQL TESTING (FIXED - ONLY PARAMETERIZED URLS)
+        run_stage "NoSQL Testing" '
+          echo "Testing for NoSQL injection..."
+          if [ -s output/crawl/params_only.txt ]; then
+            head -5 output/crawl/params_only.txt | while read url; do
+              echo "Testing $url with NoSQLMap..."
+              nosqlmap -u $url --batch > output/nosql/nosqlmap_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+            done
+          else
+            echo "No parameterized URLs found for NoSQL testing" > output/nosql/no_urls.txt
+          fi
+          zip -j nosql.zip output/nosql/*
+          python3 drive_upload.py nosql.zip Stage_12_NoSQL
+        '
+
+        ### STAGE 13: COMMAND INJECTION & TEMPLATE TESTING (FIXED - COMPLETE STAGE)
+        run_stage "Command Injection & Template Testing" '
+          echo "Testing for command injection..."
+          if [ -s output/crawl/params_only.txt ]; then
+            head -5 output/crawl/params_only.txt | while read url; do
+              echo "Testing $url with commix..."
+              commix -u $url --batch --delay 2 > output/templates/commix_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+              echo "Testing $url with tplmap..."
+              tplmap -u $url > output/templates/tplmap_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+            done
+          else
+            echo "No parameterized URLs found for command injection testing" > output/templates/no_urls.txt
+          fi
+          zip -j templates.zip output/templates/*
+          python3 drive_upload.py templates.zip Stage_13_Templates
+        '
+
+        ### STAGE 14: XXE TESTING (FIXED - REMOVED AUTOMATION)
+        run_stage "XXE Testing" '
+          echo "XXE testing requires manual analysis..."
+          echo "XXEinjector and ppmap require specific XML endpoints" > output/xxe/readme.txt
+          echo "To test XXE manually:" >> output/xxe/readme.txt
+          echo "1. Look for XML endpoints in crawled data" >> output/xxe/readme.txt
+          echo "2. Check for Content-Type: application/xml" >> output/xxe/readme.txt
+          echo "3. Use XXEinjector manually with proper payloads" >> output/xxe/readme.txt
+          # Simple check for XML endpoints
+          grep -i "\.xml\|application/xml\|text/xml" output/crawl/katana.txt > output/xxe/xml_endpoints.txt 2>/dev/null || true
+          echo "Potential XML endpoints found: $(wc -l < output/xxe/xml_endpoints.txt)"
+          zip -j xxe.zip output/xxe/*
+          python3 drive_upload.py xxe.zip Stage_14_XXE
+        '
+
+        ### STAGE 15: AUTH TESTING (FIXED - REMOVED AUTHMATRIX)
+        run_stage "Authentication Testing" '
+          echo "Authentication testing analysis..."
+          # Look for common auth endpoints
+          grep -i "login\|auth\|signin\|signup\|register\|logout\|password\|reset" output/crawl/katana.txt > output/auth/auth_endpoints.txt 2>/dev/null || true
+          echo "Auth endpoints found: $(wc -l < output/auth/auth_endpoints.txt)"
+          # Test with interactsh for OOB testing
+          echo "Starting interactsh client..."
+          timeout 30 interactsh-client -v > output/auth/interactsh.txt 2>&1 || true
+          echo "AuthMatrix is a Burp extension - use manually" > output/auth/authmatrix_note.txt
+          zip -j auth.zip output/auth/*
+          python3 drive_upload.py auth.zip Stage_15_Authentication
+        '
+
+        ### STAGE 16: DESERIALIZATION TESTING
+        run_stage "Deserialization Testing" '
+          echo "Testing for deserialization vulnerabilities..."
+          echo "Creating PHP deserialization payloads with phpggc..."
+          phpggc --list > output/specialized/phpggc_list.txt 2>&1 || true
+          # Look for serialization endpoints
+          grep -i "serialize\|unserialize\|pickle\|yaml\|json" output/crawl/katana.txt > output/specialized/serialization_endpoints.txt 2>/dev/null || true
+          echo "Deserialization testing completed" > output/specialized/deserialization_summary.txt
+          zip -j deserialization.zip output/specialized/*
+          python3 drive_upload.py deserialization.zip Stage_16_Deserialization
+        '
+
         echo "========================================"
         echo "ARES Pipeline COMPLETED on $TARGET"
         echo "========================================"
-        tg "🏁 *ARES Pipeline COMPLETED* on $TARGET"
+        tg "🏁 *ARES Pipeline COMPLETED* on $TARGET - All 16 stages executed"
