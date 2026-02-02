@@ -25,7 +25,7 @@ jobs:
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm
+        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm dirb seclists
         # Set up proper PATH for Go binaries
         echo "GOPATH=$HOME/go" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
@@ -101,28 +101,6 @@ jobs:
         cd $HOME/tools/ghauri
         python3 ghauri "$@"' | sudo tee /usr/local/bin/ghauri
         sudo chmod +x /usr/local/bin/ghauri
-
-    - name: Install NoSQLMap (from GitHub - NOT on PyPI)
-      run: |
-        echo "Installing NoSQLMap from GitHub..."
-        git clone --depth 1 https://github.com/codingo/NoSQLMap.git $HOME/tools/NoSQLMap
-        cd $HOME/tools/NoSQLMap
-        pip3 install -r requirements.txt --user
-        echo '#!/bin/bash
-        cd $HOME/tools/NoSQLMap
-        python2 nosqlmap.py "$@"' | sudo tee /usr/local/bin/nosqlmap
-        sudo chmod +x /usr/local/bin/nosqlmap
-
-    - name: Install tplmap (from GitHub - NOT on PyPI)
-      run: |
-        echo "Installing tplmap from GitHub..."
-        git clone --depth 1 https://github.com/epinna/tplmap.git $HOME/tools/tplmap
-        cd $HOME/tools/tplmap
-        pip3 install -r requirements.txt --user
-        echo '#!/bin/bash
-        cd $HOME/tools/tplmap
-        python2 tplmap.py "$@"' | sudo tee /usr/local/bin/tplmap
-        sudo chmod +x /usr/local/bin/tplmap
 
     - name: Install phpggc (from GitHub - NOT on PyPI)
       run: |
@@ -487,30 +465,23 @@ jobs:
           python3 drive_upload.py sql.zip Stage_11_SQL_Injection
         '
 
-        ### STAGE 12: NoSQL TESTING (FIXED - ONLY PARAMETERIZED URLS)
+        ### STAGE 12: NoSQL TESTING (FIXED - DISABLED PYTHON2 TOOLS)
         run_stage "NoSQL Testing" '
-          echo "Testing for NoSQL injection..."
-          if [ -s output/crawl/params_only.txt ]; then
-            head -5 output/crawl/params_only.txt | while read url; do
-              echo "Testing $url with NoSQLMap..."
-              nosqlmap -u $url --batch > output/nosql/nosqlmap_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
-            done
-          else
-            echo "No parameterized URLs found for NoSQL testing" > output/nosql/no_urls.txt
-          fi
+          echo "NoSQL injection testing skipped (python2 deprecated on GitHub Actions)" > output/nosql/no_urls.txt
+          echo "NoSQLMap requires python2 which is not available on ubuntu-latest" >> output/nosql/no_urls.txt
+          echo "Consider using manual testing with modern NoSQL injection tools" >> output/nosql/no_urls.txt
           zip -j nosql.zip output/nosql/*
           python3 drive_upload.py nosql.zip Stage_12_NoSQL
         '
 
-        ### STAGE 13: COMMAND INJECTION & TEMPLATE TESTING (FIXED - COMPLETE STAGE)
+        ### STAGE 13: COMMAND INJECTION & TEMPLATE TESTING (FIXED - DISABLED PYTHON2 TOOLS)
         run_stage "Command Injection & Template Testing" '
           echo "Testing for command injection..."
           if [ -s output/crawl/params_only.txt ]; then
             head -5 output/crawl/params_only.txt | while read url; do
               echo "Testing $url with commix..."
               commix -u $url --batch --delay 2 > output/templates/commix_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
-              echo "Testing $url with tplmap..."
-              tplmap -u $url > output/templates/tplmap_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+              echo "tplmap skipped (python2 deprecated on GitHub Actions)" > output/templates/tplmap_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt
             done
           else
             echo "No parameterized URLs found for command injection testing" > output/templates/no_urls.txt
