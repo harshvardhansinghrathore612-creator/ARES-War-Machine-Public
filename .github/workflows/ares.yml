@@ -67,7 +67,18 @@ jobs:
       run: |
         echo "Installing Python tools..."
         pip3 install --upgrade pip --user
-        pip3 install arjun checkov s3scanner swagger-parser paramspider x8 git-secrets ghauri nosqlmap commix tplmap phpggc --user
+        pip3 install arjun checkov s3scanner swagger-parser x8 git-secrets ghauri nosqlmap commix tplmap phpggc --user
+
+    - name: Install paramspider (from GitHub)
+      run: |
+        echo "Installing paramspider from GitHub..."
+        git clone --depth 1 https://github.com/devanshbatham/paramspider.git $HOME/tools/paramspider
+        cd $HOME/tools/paramspider
+        pip3 install -r requirements.txt --user
+        echo '#!/bin/bash
+        cd $HOME/tools/paramspider
+        python3 paramspider.py "$@"' | sudo tee /usr/local/bin/paramspider
+        sudo chmod +x /usr/local/bin/paramspider
 
     - name: Install JWT Tool (from GitHub)
       run: |
@@ -379,7 +390,7 @@ jobs:
 
         ### STAGE 9: JWT TESTING
         run_stage "JWT Testing" '
-          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE6MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
+          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
           
           jwt_tool output/specialized/sample_jwt.txt > output/specialized/jwt_tool.txt 2>&1 || true
           
