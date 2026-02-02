@@ -25,7 +25,7 @@ jobs:
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev
+        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm
         # Set up proper PATH for Go binaries
         echo "GOPATH=$HOME/go" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
@@ -63,12 +63,12 @@ jobs:
         
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
 
-    - name: Install Python tools (FIXED - NO git-secrets)
+    - name: Install Python tools (ONLY AVAILABLE ON PyPI)
       run: |
-        echo "Installing Python tools..."
+        echo "Installing Python tools from PyPI..."
         pip3 install --upgrade pip --user
-        # Install only available PyPI packages
-        pip3 install arjun checkov s3scanner swagger-parser x8 ghauri nosqlmap commix tplmap phpggc --user
+        # Install ONLY tools that exist on PyPI
+        pip3 install arjun checkov s3scanner swagger-parser x8 commix tplmap phpggc --user
 
     - name: Install git-secrets (AWS tool)
       run: |
@@ -90,6 +90,28 @@ jobs:
         cd $HOME/tools/paramspider
         python3 paramspider.py "$@"' | sudo tee /usr/local/bin/paramspider
         sudo chmod +x /usr/local/bin/paramspider
+
+    - name: Install ghauri (from GitHub - NOT on PyPI)
+      run: |
+        echo "Installing ghauri from GitHub..."
+        git clone --depth 1 https://github.com/s0md3v/ghauri.git $HOME/tools/ghauri
+        cd $HOME/tools/ghauri
+        pip3 install -r requirements.txt --user
+        echo '#!/bin/bash
+        cd $HOME/tools/ghauri
+        python3 ghauri "$@"' | sudo tee /usr/local/bin/ghauri
+        sudo chmod +x /usr/local/bin/ghauri
+
+    - name: Install NoSQLMap (from GitHub - NOT on PyPI)
+      run: |
+        echo "Installing NoSQLMap from GitHub..."
+        git clone --depth 1 https://github.com/codingo/NoSQLMap.git $HOME/tools/NoSQLMap
+        cd $HOME/tools/NoSQLMap
+        pip3 install -r requirements.txt --user
+        echo '#!/bin/bash
+        cd $HOME/tools/NoSQLMap
+        python2 nosqlmap.py "$@"' | sudo tee /usr/local/bin/nosqlmap
+        sudo chmod +x /usr/local/bin/nosqlmap
 
     - name: Install JWT Tool (from GitHub)
       run: |
