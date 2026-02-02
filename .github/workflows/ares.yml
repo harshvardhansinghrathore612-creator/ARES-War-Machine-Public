@@ -15,7 +15,7 @@ jobs:
     - name: Clean previous data
       run: |
         rm -rf output *.zip || true
-        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized}
+        mkdir -p output/{recon,probe,crawl/vulns/secrets,specialized}
 
     - name: Install core dependencies
       run: |
@@ -23,11 +23,13 @@ jobs:
         sudo apt-get install -y python3-pip zip curl wget git ruby-full chromium chromium-driver xvfb libpcap-dev libxml2-dev libxslt1-dev
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-    - name: Install Go tools
+    - name: Install Go tools (GitHub-safe)
       run: |
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
         go install github.com/tomnomnom/assetfinder@latest
+        go install github.com/findomain/findomain@latest
         go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+        go install github.com/projectdiscovery/puredns/cmd/puredns@latest
         go install github.com/projectdiscovery/httpx/cmd/httpx@latest
         go install github.com/projectdiscovery/katana/cmd/katana@latest
         go install github.com/lc/gau/v2/cmd/gau@latest
@@ -35,6 +37,9 @@ jobs:
         go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
         go install github.com/tomnomnom/waybackurls@latest
         go install github.com/hakluke/hakrawler@latest
+        curl -LO https://github.com/hakluke/gospider/releases/latest/download/gospider-linux
+        chmod +x gospider-linux
+        sudo mv gospider-linux /usr/local/bin/gospider
         go install github.com/tomnomnom/qsreplace@latest
         go install github.com/tomnomnom/unfurl@latest
         go install github.com/tomnomnom/paramspider@latest
@@ -42,23 +47,19 @@ jobs:
 
     - name: Install Python tools
       run: |
-        pip3 install trufflehog gitleaks paramspider arjun corsy crlfsuite openredirex lfimap ssrfmap detect-secrets jsluice mantra checkov tfsec prowler cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser
+        pip3 install trufflehog gitleaks detect-secrets secretfinder arjun paramspider \
+                     trivy checkov tfsec prowler cloudsplaining s3scanner \
+                     graphqlmap inql jwt_tool swagger-parser
 
     - name: Jaeles Signatures
       run: |
         jaeles config init
         git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
 
-    - name: Download gospider binary
-      run: |
-        curl -LO https://github.com/hakluke/gospider/releases/latest/download/gospider-linux
-        chmod +x gospider-linux
-        sudo mv gospider-linux /usr/local/bin/gospider
-
     - name: Create Google Drive uploader
       run: |
         cat << 'EOF' > drive_upload.py
-        import os,sys
+        import os, sys
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
@@ -69,7 +70,7 @@ jobs:
                 token_uri="https://oauth2.googleapis.com/token",
                 client_id=os.environ["GOOGLE_CLIENT_ID"],
                 client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
-            service = build("drive","v3",credentials=creds)
+            service = build("drive", "v3", credentials=creds)
 
             query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents and trashed=false"
             res = service.files().list(q=query).execute().get("files",[])
@@ -77,12 +78,16 @@ jobs:
                 folder_id = res[0]["id"]
             else:
                 folder = service.files().create(
-                    body={"name":folder_name,"mimeType":"application/vnd.google-apps.folder","parents":[os.environ["GDRIVE_FOLDER_ID"]]},
+                    body={"name": folder_name,
+                          "mimeType":"application/vnd.google-apps.folder",
+                          "parents":[os.environ["GDRIVE_FOLDER_ID"]]},
                     fields="id").execute()
                 folder_id = folder["id"]
 
             media = MediaFileUpload(file_path)
-            service.files().create(body={"name":os.path.basename(file_path),"parents":[folder_id]},media_body=media).execute()
+            service.files().create(
+                body={"name": os.path.basename(file_path),"parents":[folder_id]},
+                media_body=media).execute()
 
         if __name__ == "__main__":
             upload(sys.argv[1], sys.argv[2])
@@ -112,7 +117,9 @@ jobs:
         tg "🔍 Recon started"
         subfinder -d $TARGET -silent > output/recon/subs.txt || true
         assetfinder --subs-only $TARGET >> output/recon/subs.txt || true
+        findomain -t $TARGET -q -o output/recon/findomain.txt || true
         dnsx -l output/recon/subs.txt -silent > output/recon/dnsx.txt || true
+        puredns resolve output/recon/subs.txt -r /etc/resolv.conf -o output/recon/puredns.txt || true
         sort -u output/recon/subs.txt > output/recon/final_subs.txt
         zip -j recon.zip output/recon/*
         python3 drive_upload.py recon.zip Stage_1_Recon
@@ -121,8 +128,6 @@ jobs:
         ### STAGE 2: PROBING
         tg "🌐 Probing started"
         httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt || true
-        httprobe < output/recon/final_subs.txt > output/probe/httprobe.txt || true
-        whatweb -i output/recon/final_subs.txt -o output/probe/whatweb.txt || true
         zip -j probe.zip output/probe/*
         python3 drive_upload.py probe.zip Stage_2_Probe
         tg "✅ Probing finished"
@@ -153,11 +158,6 @@ jobs:
         tg "💥 Vulnerability scan started"
         nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt || true
         dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt || true
-        corsy -u $TARGET > output/vulns/corsy.txt || true
-        crlfsuite scan $TARGET -o output/vulns/crlfsuite.txt || true
-        openredirex -u $TARGET > output/vulns/openredirex.txt || true
-        lfimap -u $TARGET -o output/vulns/lfimap.txt || true
-        ssrfmap -u $TARGET > output/vulns/ssrfmap.txt || true
         zip -j vulns.zip output/vulns/*
         python3 drive_upload.py vulns.zip Stage_5_Vulns
         tg "✅ Vulnerability scan finished"
@@ -167,8 +167,7 @@ jobs:
         trufflehog filesystem . > output/secrets/trufflehog.txt || true
         gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true
         detect-secrets scan > output/secrets/detect_secrets.txt || true
-        jsluice scan > output/secrets/jsluice.txt || true
-        mantra scan > output/secrets/mantra.txt || true
+        secretfinder -i . -o output/secrets/secretfinder.txt || true
         zip -j secrets.zip output/secrets/*
         python3 drive_upload.py secrets.zip Stage_6_Secrets
         tg "🏁 ARES completed on $TARGET"
