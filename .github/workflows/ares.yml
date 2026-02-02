@@ -34,7 +34,7 @@ jobs:
 
     - name: Install Go tools (GitHub-safe)
       run: |
-        # Install Go tools with proper module support
+        echo "Installing Go tools..."
         export GO111MODULE=on
         export GOPATH=$HOME/go
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
@@ -52,22 +52,22 @@ jobs:
         go install github.com/tomnomnom/qsreplace@latest
         go install github.com/tomnomnom/unfurl@latest
         go install github.com/Emoe/kxss@latest
-        # Install tfsec (Go tool)
         go install github.com/aquasecurity/tfsec/cmd/tfsec@latest
-        # Copy binaries to /usr/local/bin for global access
+        
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
 
     - name: Install Python tools
       run: |
+        echo "Installing Python tools..."
         pip3 install --upgrade pip --user
-        pip3 install arjun checkov cloudsplaining s3scanner inql swagger-parser --user
+        pip3 install arjun checkov s3scanner swagger-parser --user
 
     - name: Install JWT Tool (from GitHub)
       run: |
+        echo "Installing JWT Tool..."
         git clone --depth 1 https://github.com/ticarpi/jwt_tool.git $HOME/tools/jwt_tool
         cd $HOME/tools/jwt_tool
         pip3 install -r requirements.txt --user
-        # Create a wrapper script
         echo '#!/bin/bash
         cd $HOME/tools/jwt_tool
         python3 jwt_tool.py "$@"' | sudo tee /usr/local/bin/jwt_tool
@@ -75,59 +75,67 @@ jobs:
 
     - name: Install TruffleHog v3 (Binary)
       run: |
+        echo "Installing TruffleHog..."
         curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog_linux_amd64 -o trufflehog
         chmod +x trufflehog
         sudo mv trufflehog /usr/local/bin/
 
     - name: Install GraphQLMap (from GitHub)
       run: |
+        echo "Installing GraphQLMap..."
         mkdir -p $HOME/tools
         git clone --depth 1 https://github.com/swisskyrepo/GraphQLmap.git $HOME/tools/GraphQLmap
         cd $HOME/tools/GraphQLmap
         pip3 install -r requirements.txt --user
-        # Create a wrapper script
         echo '#!/bin/bash
         cd $HOME/tools/GraphQLmap
         python3 graphqlmap.py "$@"' | sudo tee /usr/local/bin/graphqlmap
         sudo chmod +x /usr/local/bin/graphqlmap
 
-    - name: Install Prowler (AWS Security Tool)
+    - name: Install inql properly
       run: |
-        pip3 install prowler --user
+        echo "Installing inql..."
+        pip3 install inql --user
+        # Create wrapper script for inql
+        echo '#!/bin/bash
+        python3 -c "from inql.cli import main; main()" "$@"' | sudo tee /usr/local/bin/inql
+        sudo chmod +x /usr/local/bin/inql
 
     - name: Install Jaeles
       run: |
+        echo "Installing Jaeles..."
         export GO111MODULE=on
         export GOPATH=$HOME/go
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
         
         go install github.com/jaeles-project/jaeles@latest
         sudo cp $HOME/go/bin/jaeles /usr/local/bin/
-        jaeles config init
-        git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
+        mkdir -p $HOME/.jaeles
+        jaeles config init || echo "Jaeles config initialized"
+        git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || echo "Signatures already exist"
 
     - name: Download precompiled binaries
       run: |
-        # gospider - FIXED URL
+        echo "Downloading precompiled binaries..."
+        # gospider - FIXED
         curl -L -o gospider-linux "https://github.com/hakluke/gospider/releases/latest/download/gospider_linux_amd64"
         chmod +x gospider-linux
         sudo mv gospider-linux /usr/local/bin/gospider
         
-        # gitleaks - FIXED: Use correct download URL
+        # gitleaks - FIXED
         curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep "browser_download_url.*linux_x64.tar.gz" | cut -d '"' -f 4 | xargs curl -L -o gitleaks.tar.gz
         tar -xzf gitleaks.tar.gz
-        # Find the binary (it might be in a subdirectory)
         find . -name "gitleaks" -type f -exec chmod +x {} \; 2>/dev/null || true
         if [ -f "gitleaks" ]; then
           sudo mv gitleaks /usr/local/bin/gitleaks
         elif [ -f "gitleaks-linux-amd64" ]; then
           sudo mv gitleaks-linux-amd64 /usr/local/bin/gitleaks
         fi
-        # Clean up
         rm -f gitleaks.tar.gz
 
     - name: Create Google Drive uploader
       run: |
+        echo "Creating Google Drive uploader..."
         cat << 'EOF' > drive_upload.py
         import os, sys
         from google.oauth2.credentials import Credentials
@@ -135,30 +143,35 @@ jobs:
         from googleapiclient.http import MediaFileUpload
 
         def upload(file_path, folder_name):
-            creds = Credentials(None,
-                refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=os.environ["GOOGLE_CLIENT_ID"],
-                client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
-            service = build("drive","v3",credentials=creds)
+            try:
+                creds = Credentials(None,
+                    refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=os.environ["GOOGLE_CLIENT_ID"],
+                    client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
+                service = build("drive","v3",credentials=creds)
 
-            query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents and trashed=false"
-            res = service.files().list(q=query).execute().get("files",[])
-            if res:
-                folder_id = res[0]["id"]
-            else:
-                folder = service.files().create(
-                    body={"name":folder_name,"mimeType":"application/vnd.google-apps.folder","parents":[os.environ["GDRIVE_FOLDER_ID"]]},
-                    fields="id").execute()
-                folder_id = folder["id"]
+                query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents and trashed=false"
+                res = service.files().list(q=query).execute().get("files",[])
+                if res:
+                    folder_id = res[0]["id"]
+                else:
+                    folder = service.files().create(
+                        body={"name":folder_name,"mimeType":"application/vnd.google-apps.folder","parents":[os.environ["GDRIVE_FOLDER_ID"]]},
+                        fields="id").execute()
+                    folder_id = folder["id"]
 
-            media = MediaFileUpload(file_path)
-            service.files().create(body={"name":os.path.basename(file_path),"parents":[folder_id]},media_body=media).execute()
+                media = MediaFileUpload(file_path)
+                service.files().create(body={"name":os.path.basename(file_path),"parents":[folder_id]},media_body=media).execute()
+                print(f"Uploaded {file_path} to {folder_name}")
+            except Exception as e:
+                print(f"Google Drive upload failed: {e}")
+                return False
+            return True
 
         if __name__ == "__main__":
             upload(sys.argv[1], sys.argv[2])
         EOF
-        # Install required Python packages for Google Drive API
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib --user
 
     - name: Run ARES pipeline
@@ -170,164 +183,155 @@ jobs:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        # Create targets.txt if it doesn't exist
         if [ ! -f targets.txt ]; then
           echo "example.com" > targets.txt
         fi
         
         TARGET=$(head -n 1 targets.txt)
+        echo "Target: $TARGET"
 
-        # Improved Telegram function with error handling
         tg() {
           local message="$1"
           echo "Sending Telegram: $message"
           curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
             -d chat_id="$TELEGRAM_CHAT_ID" \
             -d parse_mode="Markdown" \
-            -d text="$message" || echo "Telegram notification failed (check TELEGRAM_TOKEN/TELEGRAM_CHAT_ID secrets)"
+            -d text="$message" || echo "Telegram notification failed"
         }
 
-        # Send start notification
         tg "🚀 *ARES Pipeline Started* on $TARGET"
 
-        # Function to handle errors and send notifications
         run_stage() {
           local stage_name=$1
           local stage_command=$2
           
+          echo "========================================"
           echo "Starting $stage_name..."
+          echo "========================================"
           if eval "$stage_command"; then
+            echo "$stage_name completed successfully"
             tg "✅ $stage_name completed successfully"
             return 0
           else
             local exit_code=$?
-            tg "❌ *$stage_name FAILED* (exit code: $exit_code) - Pipeline stopped"
-            exit 1
+            echo "$stage_name FAILED with exit code: $exit_code"
+            tg "⚠️ $stage_name had issues but continuing..."
+            return 0  # DON'T STOP PIPELINE
           fi
         }
 
         ### STAGE 1: RECON
         run_stage "Reconnaissance" '
-          subfinder -d $TARGET -silent > output/recon/subs.txt 2>/dev/null || true
-          assetfinder --subs-only $TARGET >> output/recon/subs.txt 2>/dev/null || true
-          sort -u output/recon/subs.txt > output/recon/final_subs.txt 2>/dev/null || true
-          dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt 2>/dev/null || true
-          zip -j recon.zip output/recon/* 2>/dev/null || true
-          python3 drive_upload.py recon.zip Stage_1_Recon 2>/dev/null || true
+          subfinder -d $TARGET -silent > output/recon/subs.txt
+          assetfinder --subs-only $TARGET >> output/recon/subs.txt
+          sort -u output/recon/subs.txt > output/recon/final_subs.txt
+          dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt
+          zip -j recon.zip output/recon/*
+          python3 drive_upload.py recon.zip Stage_1_Recon
         '
 
         ### STAGE 2: PROBING
         run_stage "Probing" '
-          httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt 2>/dev/null || true
-          zip -j probe.zip output/probe/* 2>/dev/null || true
-          python3 drive_upload.py probe.zip Stage_2_Probe 2>/dev/null || true
+          httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt
+          echo "Live hosts: $(wc -l < output/probe/live.txt)"
+          cat output/probe/live.txt
+          zip -j probe.zip output/probe/*
+          python3 drive_upload.py probe.zip Stage_2_Probe
         '
 
         ### STAGE 3: CRAWLING
         run_stage "Crawling" '
-          katana -l output/probe/live.txt -silent > output/crawl/katana.txt 2>/dev/null || true
-          gau $TARGET >> output/crawl/gau.txt 2>/dev/null || true
-          waybackurls $TARGET >> output/crawl/wayback.txt 2>/dev/null || true
-          hakrawler -url $TARGET > output/crawl/hakrawler.txt 2>/dev/null || true
-          gospider -s $TARGET -o output/crawl/gospider.txt 2>/dev/null || true
-          zip -j crawl.zip output/crawl/* 2>/dev/null || true
-          python3 drive_upload.py crawl.zip Stage_3_Crawl 2>/dev/null || true
+          katana -l output/probe/live.txt -silent > output/crawl/katana.txt
+          gau $TARGET >> output/crawl/gau.txt
+          waybackurls $TARGET >> output/crawl/wayback.txt
+          hakrawler -url $TARGET > output/crawl/hakrawler.txt
+          # FIXED: gospider with directory output
+          gospider -s $TARGET -o output/crawl/gospider/
+          find output/crawl/gospider/ -type f -name "*.txt" -exec cat {} \; > output/crawl/gospider_combined.txt 2>/dev/null || true
+          zip -j crawl.zip output/crawl/*
+          python3 drive_upload.py crawl.zip Stage_3_Crawl
         '
 
         ### STAGE 4: PARAMS & XSS
         run_stage "Parameter & XSS Scan" '
-          # FIXED: Correct qsreplace usage
-          cat output/crawl/katana.txt 2>/dev/null | qsreplace "FUZZ" > output/crawl/qsreplace.txt 2>/dev/null || true
-          # FIXED: Correct kxss usage
-          cat output/crawl/katana.txt 2>/dev/null | kxss > output/crawl/kxss.txt 2>/dev/null || true
-          # FIXED: Correct unfurl usage
-          cat output/crawl/katana.txt 2>/dev/null | unfurl paths keys values > output/crawl/unfurl.txt 2>/dev/null || true
-          zip -j params.zip output/crawl/* 2>/dev/null || true
-          python3 drive_upload.py params.zip Stage_4_Params 2>/dev/null || true
+          cat output/crawl/katana.txt | qsreplace "FUZZ" > output/crawl/qsreplace.txt
+          cat output/crawl/katana.txt | kxss > output/crawl/kxss.txt
+          cat output/crawl/katana.txt | unfurl paths keys values > output/crawl/unfurl.txt
+          zip -j params.zip output/crawl/*
+          python3 drive_upload.py params.zip Stage_4_Params
         '
 
         ### STAGE 5: VULNS
         run_stage "Vulnerability Scanning" '
-          nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt 2>/dev/null || true
-          dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt 2>/dev/null || true
-          zip -j vulns.zip output/vulns/* 2>/dev/null || true
-          python3 drive_upload.py vulns.zip Stage_5_Vulns 2>/dev/null || true
+          nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt
+          dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt
+          zip -j vulns.zip output/vulns/*
+          python3 drive_upload.py vulns.zip Stage_5_Vulns
         '
 
         ### STAGE 6: SECRETS
         run_stage "Secrets Detection" '
-          trufflehog filesystem . > output/secrets/trufflehog.txt 2>/dev/null || true
-          gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null || true
-          zip -j secrets.zip output/secrets/* 2>/dev/null || true
-          python3 drive_upload.py secrets.zip Stage_6_Secrets 2>/dev/null || true
+          trufflehog filesystem . --no-update > output/secrets/trufflehog.txt
+          gitleaks detect --no-git -v > output/secrets/gitleaks.txt
+          zip -j secrets.zip output/secrets/*
+          python3 drive_upload.py secrets.zip Stage_6_Secrets
         '
 
         ### STAGE 7: GRAPHQL & API TESTING
         run_stage "GraphQL & API Testing" '
-          # Create sample GraphQL endpoint list
-          echo "https://$TARGET/graphql" > output/graphql/endpoints.txt 2>/dev/null || true
-          echo "https://$TARGET/api/graphql" >> output/graphql/endpoints.txt 2>/dev/null || true
-          echo "https://api.$TARGET/graphql" >> output/graphql/endpoints.txt 2>/dev/null || true
+          echo "https://$TARGET/graphql" > output/graphql/endpoints.txt
+          echo "https://$TARGET/api/graphql" >> output/graphql/endpoints.txt
+          echo "https://api.$TARGET/graphql" >> output/graphql/endpoints.txt
           
-          # Test GraphQL endpoints
-          for endpoint in $(cat output/graphql/endpoints.txt 2>/dev/null || echo ""); do
-            if [ -n "$endpoint" ]; then
-              echo "Testing $endpoint with GraphQLMap..." >> output/graphql/graphqlmap.txt 2>/dev/null || true
-              timeout 30 graphqlmap -u $endpoint -v >> output/graphql/graphqlmap.txt 2>&1 || true
-              echo "Testing $endpoint with inql..." >> output/graphql/inql.txt 2>/dev/null || true
-              timeout 30 python3 -m inql -t $endpoint >> output/graphql/inql.txt 2>&1 || true
-            fi
+          for endpoint in $(cat output/graphql/endpoints.txt); do
+            echo "Testing $endpoint with GraphQLMap..."
+            timeout 30 graphqlmap -u $endpoint -v >> output/graphql/graphqlmap.txt 2>&1 || true
+            echo "Testing $endpoint with inql..."
+            inql -t $endpoint >> output/graphql/inql.txt 2>&1 || true
           done
           
-          # Test for Swagger/OpenAPI
-          echo "https://$TARGET/swagger.json" > output/api/swagger_endpoints.txt 2>/dev/null || true
-          echo "https://$TARGET/api-docs" >> output/api/swagger_endpoints.txt 2>/dev/null || true
+          echo "https://$TARGET/swagger.json" > output/api/swagger_endpoints.txt
+          echo "https://$TARGET/api-docs" >> output/api/swagger_endpoints.txt
           
-          zip -j graphql_api.zip output/graphql/* output/api/* 2>/dev/null || true
-          python3 drive_upload.py graphql_api.zip Stage_7_GraphQL_API 2>/dev/null || true
+          zip -j graphql_api.zip output/graphql/* output/api/*
+          python3 drive_upload.py graphql_api.zip Stage_7_GraphQL_API
         '
 
-        ### STAGE 8: CLOUD SECURITY
+        ### STAGE 8: CLOUD SECURITY (FIXED - NO CLOUDSPLAINING)
         run_stage "Cloud Security Scanning" '
-          # Create sample cloud config files for testing
-          echo "provider \"aws\" {}" > test.tf 2>/dev/null || true
-          echo "resource \"aws_s3_bucket\" \"test\" {}" >> test.tf 2>/dev/null || true
+          echo "provider \"aws\" {}" > test.tf
+          echo "resource \"aws_s3_bucket\" \"test\" {}" >> test.tf
           
-          # Run cloud security tools
           tfsec . > output/cloud/tfsec.txt 2>&1 || true
           checkov -d . > output/cloud/checkov.txt 2>&1 || true
           
-          # Create sample AWS config for cloudsplaining
-          echo "{\"Version\": \"2012-10-17\", \"Statement\": []}" > test_policy.json 2>/dev/null || true
-          cloudsplaining download --input-file test_policy.json > output/cloud/cloudsplaining.txt 2>&1 || true
+          # REMOVED cloudsplaining - it requires AWS credentials
+          echo "Cloudsplaining skipped (requires AWS credentials)" > output/cloud/cloudsplaining.txt
           
-          # Clean up test files
-          rm -f test.tf test_policy.json 2>/dev/null || true
-          
-          zip -j cloud.zip output/cloud/* 2>/dev/null || true
-          python3 drive_upload.py cloud.zip Stage_8_Cloud_Security 2>/dev/null || true
+          rm -f test.tf
+          zip -j cloud.zip output/cloud/*
+          python3 drive_upload.py cloud.zip Stage_8_Cloud_Security
         '
 
         ### STAGE 9: JWT TESTING
         run_stage "JWT Testing" '
-          # Create sample JWT for testing
-          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt 2>/dev/null || true
+          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
           
-          # Test JWT tool
           jwt_tool output/specialized/sample_jwt.txt > output/specialized/jwt_tool.txt 2>&1 || true
           
-          zip -j specialized.zip output/specialized/* 2>/dev/null || true
-          python3 drive_upload.py specialized.zip Stage_9_Specialized_Tools 2>/dev/null || true
+          zip -j specialized.zip output/specialized/*
+          python3 drive_upload.py specialized.zip Stage_9_Specialized_Tools
         '
 
         ### STAGE 10: JAELES SCANNING
         run_stage "Jaeles Scanning" '
-          # Run Jaeles on live targets
           jaeles scan -s $HOME/.jaeles/signatures-base -u "https://$TARGET" > output/specialized/jaeles.txt 2>&1 || true
           
-          zip -j jaeles.zip output/specialized/* 2>/dev/null || true
-          python3 drive_upload.py jaeles.zip Stage_10_Jaeles 2>/dev/null || true
+          zip -j jaeles.zip output/specialized/*
+          python3 drive_upload.py jaeles.zip Stage_10_Jaeles
         '
 
-        # Final success notification
-        tg "🏁 *ARES Pipeline COMPLETED SUCCESSFULLY* on $TARGET"
+        echo "========================================"
+        echo "ARES Pipeline COMPLETED on $TARGET"
+        echo "========================================"
+        tg "🏁 *ARES Pipeline COMPLETED* on $TARGET"
