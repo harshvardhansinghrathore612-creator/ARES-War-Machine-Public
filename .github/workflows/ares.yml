@@ -25,11 +25,12 @@ jobs:
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full chromium chromium-driver xvfb libpcap-dev libxml2-dev libxslt1-dev
+        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev
         # Set up proper PATH for Go binaries
         echo "GOPATH=$HOME/go" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
         echo "/usr/local/go/bin" >> $GITHUB_PATH
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install Go tools (GitHub-safe)
       run: |
@@ -59,16 +60,23 @@ jobs:
     - name: Install Python tools
       run: |
         pip3 install --upgrade pip --user
-        pip3 install truffleHog arjun checkov cloudsplaining s3scanner inql jwt_tool swagger-parser --user
+        pip3 install arjun checkov cloudsplaining s3scanner inql jwt_tool swagger-parser --user
+
+    - name: Install TruffleHog v3 (Binary)
+      run: |
+        curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog_linux_amd64 -o trufflehog
+        chmod +x trufflehog
+        sudo mv trufflehog /usr/local/bin/
 
     - name: Install GraphQLMap (from GitHub)
       run: |
-        git clone --depth 1 https://github.com/swisskyrepo/GraphQLmap.git /tmp/GraphQLmap
-        cd /tmp/GraphQLmap
+        mkdir -p $HOME/tools
+        git clone --depth 1 https://github.com/swisskyrepo/GraphQLmap.git $HOME/tools/GraphQLmap
+        cd $HOME/tools/GraphQLmap
         pip3 install -r requirements.txt --user
         # Create a wrapper script
         echo '#!/bin/bash
-        cd /tmp/GraphQLmap
+        cd $HOME/tools/GraphQLmap
         python3 graphqlmap.py "$@"' | sudo tee /usr/local/bin/graphqlmap
         sudo chmod +x /usr/local/bin/graphqlmap
 
