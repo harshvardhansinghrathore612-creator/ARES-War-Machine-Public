@@ -68,7 +68,7 @@ jobs:
         echo "Installing Python tools from PyPI..."
         pip3 install --upgrade pip --user
         # Install ONLY tools that exist on PyPI
-        pip3 install arjun checkov s3scanner swagger-parser x8 commix tplmap phpggc --user
+        pip3 install arjun checkov s3scanner swagger-parser x8 commix phpggc --user
 
     - name: Install git-secrets (AWS tool)
       run: |
@@ -112,6 +112,17 @@ jobs:
         cd $HOME/tools/NoSQLMap
         python2 nosqlmap.py "$@"' | sudo tee /usr/local/bin/nosqlmap
         sudo chmod +x /usr/local/bin/nosqlmap
+
+    - name: Install tplmap (from GitHub - NOT on PyPI)
+      run: |
+        echo "Installing tplmap from GitHub..."
+        git clone --depth 1 https://github.com/epinna/tplmap.git $HOME/tools/tplmap
+        cd $HOME/tools/tplmap
+        pip3 install -r requirements.txt --user
+        echo '#!/bin/bash
+        cd $HOME/tools/tplmap
+        python2 tplmap.py "$@"' | sudo tee /usr/local/bin/tplmap
+        sudo chmod +x /usr/local/bin/tplmap
 
     - name: Install JWT Tool (from GitHub)
       run: |
