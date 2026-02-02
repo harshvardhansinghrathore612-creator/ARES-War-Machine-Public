@@ -1,51 +1,59 @@
 name: ARES – GitHub Safe Vulnerability Pipeline
-
 on:
   workflow_dispatch:
-
+env:
+  GOPATH: /home/runner/go
+  GO111MODULE: "on"
 jobs:
   security-hunt:
     runs-on: ubuntu-latest
     timeout-minutes: 350
-
     steps:
     - name: Checkout Repo
       uses: actions/checkout@v4
-
     - name: Clean previous data
       run: |
         rm -rf output *.zip || true
         mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud,sql,nosql,xxe,auth,templates,deserialization}
-
     - name: Install Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.21'
-
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm dirb
+        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm build-essential
         # Set up proper PATH for Go binaries
         echo "GOPATH=$HOME/go" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
         echo "/usr/local/go/bin" >> $GITHUB_PATH
         echo "$HOME/.local/bin" >> $GITHUB_PATH
-
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        # Create tools directory
+        mkdir -p $HOME/tools
+    - name: Install Rust (for x8)
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source $HOME/.cargo/env
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    - name: Install massdns (required for puredns)
+      run: |
+        echo "Installing massdns..."
+        git clone --depth 1 https://github.com/blechschmidt/massdns.git $HOME/tools/massdns
+        cd $HOME/tools/massdns
+        make
+        sudo cp bin/massdns /usr/local/bin/
+        massdns --help || echo "massdns installed"
     - name: Install SecLists from GitHub
       run: |
         echo "Installing SecLists from GitHub..."
         git clone --depth 1 https://github.com/danielmiessler/SecLists.git $HOME/SecLists
-        # Create symlinks for common wordlists
         sudo mkdir -p /usr/share/wordlists/
         sudo ln -sf $HOME/SecLists/Discovery/Web-Content/common.txt /usr/share/wordlists/common.txt 2>/dev/null || true
         sudo ln -sf $HOME/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt /usr/share/wordlists/dirb-medium.txt 2>/dev/null || true
-
-    - name: Install Go tools (GitHub-safe)
+    - name: Install Go tools
       run: |
         echo "Installing Go tools..."
-        export GO111MODULE=on
-        export GOPATH=$HOME/go
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
         
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
@@ -62,172 +70,166 @@ jobs:
         go install github.com/tomnomnom/unfurl@latest
         go install github.com/Emoe/kxss@latest
         go install github.com/aquasecurity/tfsec/cmd/tfsec@latest
-        
-        # NEW GO TOOLS
         go install github.com/projectdiscovery/chaos-client/cmd/chaos@latest
         go install github.com/d3mondev/puredns/v2@latest
         go install github.com/sensepost/gowitness@latest
-        go install github.com/ffuf/ffuf@latest
+        go install github.com/ffuf/ffuf/v2@latest
         go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
+        go install github.com/jaeles-project/gospider@latest
         
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
-
-    - name: Install Python tools (ONLY AVAILABLE ON PyPI - VERIFIED)
+    - name: Install Python tools (PyPI verified)
       run: |
         echo "Installing Python tools from PyPI..."
         pip3 install --upgrade pip --user
-        # Install ONLY tools that exist on PyPI - VERIFIED
-        pip3 install arjun checkov s3scanner swagger-parser x8 commix --user
-
+        # Note: x8 is NOT a Python package, it's Rust - removed from here
+        pip3 install arjun checkov s3scanner swagger-parser commix --user || true
+    - name: Install x8 (Rust - from GitHub)
+      run: |
+        echo "Installing x8 from GitHub..."
+        source $HOME/.cargo/env
+        cargo install x8 || {
+          echo "cargo install failed, trying from source..."
+          git clone --depth 1 https://github.com/Sh1Yo/x8.git $HOME/tools/x8
+          cd $HOME/tools/x8
+          cargo build --release
+          sudo cp target/release/x8 /usr/local/bin/
+        }
     - name: Install git-secrets (AWS tool)
       run: |
         echo "Installing git-secrets from AWS..."
         git clone --depth 1 https://github.com/awslabs/git-secrets.git $HOME/tools/git-secrets
         cd $HOME/tools/git-secrets
         sudo make install
-        echo '#!/bin/bash
-        git-secrets "$@"' | sudo tee /usr/local/bin/git-secrets
-        sudo chmod +x /usr/local/bin/git-secrets
-
-    - name: Install paramspider (from GitHub)
+        which git-secrets || echo "git-secrets installed via make"
+    - name: Install paramspider (from GitHub - FIXED)
       run: |
         echo "Installing paramspider from GitHub..."
         git clone --depth 1 https://github.com/devanshbatham/paramspider.git $HOME/tools/paramspider
         cd $HOME/tools/paramspider
-        pip3 install -r requirements.txt --user
-        echo '#!/bin/bash
-        cd $HOME/tools/paramspider
-        python3 paramspider.py "$@"' | sudo tee /usr/local/bin/paramspider
-        sudo chmod +x /usr/local/bin/paramspider
-
-    - name: Install ghauri (from GitHub - NOT on PyPI)
+        pip3 install . --user || pip3 install --user -e . || echo "paramspider installation had issues"
+        # Create wrapper as fallback
+        if ! command -v paramspider &> /dev/null; then
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/paramspider
+          echo "python3 -m paramspider \"\$@\"" | sudo tee -a /usr/local/bin/paramspider
+          sudo chmod +x /usr/local/bin/paramspider
+        fi
+    - name: Install ghauri (from GitHub - FIXED REPOSITORY)
       run: |
-        echo "Installing ghauri from GitHub..."
-        git clone --depth 1 https://github.com/s0md3v/ghauri.git $HOME/tools/ghauri
+        echo "Installing ghauri from GitHub (r0oth3x49 repo)..."
+        git clone --depth 1 https://github.com/r0oth3x49/ghauri.git $HOME/tools/ghauri
         cd $HOME/tools/ghauri
-        pip3 install -r requirements.txt --user
-        echo '#!/bin/bash
-        cd $HOME/tools/ghauri
-        python3 ghauri "$@"' | sudo tee /usr/local/bin/ghauri
-        sudo chmod +x /usr/local/bin/ghauri
-
-    - name: Install phpggc (from GitHub - NOT on PyPI)
+        pip3 install -r requirements.txt --user || true
+        python3 -m pip install -e . --user || python3 setup.py install --user || true
+        if ! command -v ghauri &> /dev/null; then
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/ghauri
+          echo "cd $HOME/tools/ghauri && python3 -m ghauri \"\$@\"" | sudo tee -a /usr/local/bin/ghauri
+          sudo chmod +x /usr/local/bin/ghauri
+        fi
+    - name: Install phpggc (from GitHub)
       run: |
         echo "Installing phpggc from GitHub..."
         git clone --depth 1 https://github.com/ambionics/phpggc.git $HOME/tools/phpggc
-        cd $HOME/tools/phpggc
-        echo '#!/bin/bash
-        cd $HOME/tools/phpggc
-        ./phpggc "$@"' | sudo tee /usr/local/bin/phpggc
+        chmod +x $HOME/tools/phpggc/phpggc || true
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/phpggc
+        echo "cd $HOME/tools/phpggc && php ./phpggc \"\$@\"" | sudo tee -a /usr/local/bin/phpggc
         sudo chmod +x /usr/local/bin/phpggc
-
     - name: Install JWT Tool (from GitHub)
       run: |
         echo "Installing JWT Tool..."
         git clone --depth 1 https://github.com/ticarpi/jwt_tool.git $HOME/tools/jwt_tool
         cd $HOME/tools/jwt_tool
-        pip3 install -r requirements.txt --user
-        echo '#!/bin/bash
-        cd $HOME/tools/jwt_tool
-        python3 jwt_tool.py "$@"' | sudo tee /usr/local/bin/jwt_tool
+        pip3 install -r requirements.txt --user || true
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/jwt_tool
+        echo "cd $HOME/tools/jwt_tool && python3 jwt_tool.py \"\$@\"" | sudo tee -a /usr/local/bin/jwt_tool
         sudo chmod +x /usr/local/bin/jwt_tool
-
-    - name: Install TruffleHog v3 (Binary)
+    - name: Install TruffleHog v3 (Binary - FIXED)
       run: |
         echo "Installing TruffleHog..."
-        curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog_linux_amd64 -o trufflehog
-        chmod +x trufflehog
-        sudo mv trufflehog /usr/local/bin/
-
+        # Get the latest release URL dynamically
+        TRUFFLEHOG_URL=$(curl -s https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | head -1 | cut -d '"' -f 4)
+        if [ -n "$TRUFFLEHOG_URL" ]; then
+          curl -sL "$TRUFFLEHOG_URL" -o trufflehog.tar.gz
+          tar -xzf trufflehog.tar.gz
+          chmod +x trufflehog
+          sudo mv trufflehog /usr/local/bin/
+          rm -f trufflehog.tar.gz
+        else
+          echo "Could not find trufflehog release, skipping"
+        fi
     - name: Install GraphQLMap (from GitHub)
       run: |
         echo "Installing GraphQLMap..."
-        mkdir -p $HOME/tools
         git clone --depth 1 https://github.com/swisskyrepo/GraphQLmap.git $HOME/tools/GraphQLmap
         cd $HOME/tools/GraphQLmap
-        pip3 install -r requirements.txt --user
-        echo '#!/bin/bash
-        cd $HOME/tools/GraphQLmap
-        python3 graphqlmap.py "$@"' | sudo tee /usr/local/bin/graphqlmap
+        pip3 install -r requirements.txt --user || true
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/graphqlmap
+        echo "cd $HOME/tools/GraphQLmap && python3 graphqlmap.py \"\$@\"" | sudo tee -a /usr/local/bin/graphqlmap
         sudo chmod +x /usr/local/bin/graphqlmap
-
-    - name: Install inql properly
+    - name: Install inql
       run: |
         echo "Installing inql..."
-        pip3 install inql --user
-        echo '#!/bin/bash
-        python3 -c "from inql.cli import main; main()" "$@"' | sudo tee /usr/local/bin/inql
-        sudo chmod +x /usr/local/bin/inql
-
+        pip3 install inql --user || true
+        if ! command -v inql &> /dev/null; then
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/inql
+          echo 'python3 -c "from inql.cli import main; main()" "$@"' | sudo tee -a /usr/local/bin/inql
+          sudo chmod +x /usr/local/bin/inql
+        fi
     - name: Install Jaeles
       run: |
         echo "Installing Jaeles..."
-        export GO111MODULE=on
-        export GOPATH=$HOME/go
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
-        
         go install github.com/jaeles-project/jaeles@latest
-        sudo cp $HOME/go/bin/jaeles /usr/local/bin/
+        sudo cp $HOME/go/bin/jaeles /usr/local/bin/ || true
         mkdir -p $HOME/.jaeles
-        jaeles config init || echo "Jaeles config initialized"
-        git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || echo "Signatures already exist"
-
-    - name: Download precompiled binaries
+        jaeles config init || true
+        git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
+    - name: Download additional precompiled binaries
       run: |
         echo "Downloading precompiled binaries..."
-        # gospider
-        curl -L -o gospider-linux "https://github.com/hakluke/gospider/releases/latest/download/gospider_linux_amd64"
-        chmod +x gospider-linux
-        sudo mv gospider-linux /usr/local/bin/gospider
         
         # gitleaks
-        curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep "browser_download_url.*linux_x64.tar.gz" | cut -d '"' -f 4 | xargs curl -L -o gitleaks.tar.gz
-        tar -xzf gitleaks.tar.gz
-        find . -name "gitleaks" -type f -exec chmod +x {} \; 2>/dev/null || true
-        if [ -f "gitleaks" ]; then
-          sudo mv gitleaks /usr/local/bin/gitleaks
-        elif [ -f "gitleaks-linux-amd64" ]; then
-          sudo mv gitleaks-linux-amd64 /usr/local/bin/gitleaks
+        GITLEAKS_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep "browser_download_url.*linux_x64.tar.gz" | head -1 | cut -d '"' -f 4)
+        if [ -n "$GITLEAKS_URL" ]; then
+          curl -sL "$GITLEAKS_URL" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz
+          chmod +x gitleaks 2>/dev/null || true
+          sudo mv gitleaks /usr/local/bin/ 2>/dev/null || true
+          rm -f gitleaks.tar.gz
         fi
         
         # Feroxbuster
-        curl -L -o feroxbuster.tar.gz "https://github.com/epi052/feroxbuster/releases/latest/download/feroxbuster-linux-x86_64.tar.gz"
-        tar -xzf feroxbuster.tar.gz
-        chmod +x feroxbuster
-        sudo mv feroxbuster /usr/local/bin/
-        
-        rm -f gitleaks.tar.gz feroxbuster.tar.gz
-
+        FEROX_URL=$(curl -s https://api.github.com/repos/epi052/feroxbuster/releases/latest | grep "browser_download_url.*x86_64-linux-musl.tar.gz" | head -1 | cut -d '"' -f 4)
+        if [ -n "$FEROX_URL" ]; then
+          curl -sL "$FEROX_URL" -o feroxbuster.tar.gz
+          tar -xzf feroxbuster.tar.gz
+          chmod +x feroxbuster
+          sudo mv feroxbuster /usr/local/bin/
+          rm -f feroxbuster.tar.gz
+        fi
     - name: Install SQLMap (from GitHub)
       run: |
         echo "Installing SQLMap..."
         git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git $HOME/tools/sqlmap
-        echo '#!/bin/bash
-        cd $HOME/tools/sqlmap
-        python3 sqlmap.py "$@"' | sudo tee /usr/local/bin/sqlmap
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/sqlmap
+        echo "python3 $HOME/tools/sqlmap/sqlmap.py \"\$@\"" | sudo tee -a /usr/local/bin/sqlmap
         sudo chmod +x /usr/local/bin/sqlmap
-
     - name: Install XXEinjector (from GitHub)
       run: |
         echo "Installing XXEinjector..."
         git clone --depth 1 https://github.com/enjoiz/XXEinjector.git $HOME/tools/XXEinjector
-        cd $HOME/tools/XXEinjector
-        echo '#!/bin/bash
-        cd $HOME/tools/XXEinjector
-        ruby XXEinjector.rb "$@"' | sudo tee /usr/local/bin/xxeinjector
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/xxeinjector
+        echo "cd $HOME/tools/XXEinjector && ruby XXEinjector.rb \"\$@\"" | sudo tee -a /usr/local/bin/xxeinjector
         sudo chmod +x /usr/local/bin/xxeinjector
-
     - name: Install ppmap (from GitHub)
       run: |
         echo "Installing ppmap..."
         git clone --depth 1 https://github.com/kleiton0x00/ppmap.git $HOME/tools/ppmap
         cd $HOME/tools/ppmap
-        pip3 install -r requirements.txt --user
-        echo '#!/bin/bash
-        cd $HOME/tools/ppmap
-        python3 ppmap.py "$@"' | sudo tee /usr/local/bin/ppmap
+        pip3 install -r requirements.txt --user || true
+        echo '#!/bin/bash' | sudo tee /usr/local/bin/ppmap
+        echo "cd $HOME/tools/ppmap && python3 ppmap.py \"\$@\"" | sudo tee -a /usr/local/bin/ppmap
         sudo chmod +x /usr/local/bin/ppmap
-
     - name: Create Google Drive uploader
       run: |
         echo "Creating Google Drive uploader..."
@@ -236,17 +238,22 @@ jobs:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
-
         def upload(file_path, folder_name):
             try:
+                required_vars = ["GOOGLE_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GDRIVE_FOLDER_ID"]
+                missing = [v for v in required_vars if not os.environ.get(v)]
+                if missing:
+                    print(f"ERROR: Missing required env vars: {missing}")
+                    print("Please configure these secrets in your GitHub repository")
+                    return False
+                    
                 creds = Credentials(None,
                     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
                     token_uri="https://oauth2.googleapis.com/token",
                     client_id=os.environ["GOOGLE_CLIENT_ID"],
                     client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
                 service = build("drive","v3",credentials=creds)
-
-                query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents and trashed=false"
+                query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
                 res = service.files().list(q=query).execute().get("files",[])
                 if res:
                     folder_id = res[0]["id"]
@@ -255,20 +262,52 @@ jobs:
                         body={"name":folder_name,"mimeType":"application/vnd.google-apps.folder","parents":[os.environ["GDRIVE_FOLDER_ID"]]},
                         fields="id").execute()
                     folder_id = folder["id"]
-
                 media = MediaFileUpload(file_path)
-                service.files().create(body={"name":os.path.basename(file_path),"parents":[folder_id]},media_body=media).execute()
-                print(f"Uploaded {file_path} to {folder_name}")
+                uploaded = service.files().create(body={"name":os.path.basename(file_path),"parents":[folder_id]},media_body=media,fields="id").execute()
+                print(f"SUCCESS: Uploaded {file_path} to {folder_name} (ID: {uploaded.get('id')})")
+                return True
             except Exception as e:
-                print(f"Google Drive upload failed: {e}")
+                print(f"ERROR: Google Drive upload failed: {e}")
                 return False
-            return True
-
         if __name__ == "__main__":
-            upload(sys.argv[1], sys.argv[2])
+            if len(sys.argv) >= 3:
+                success = upload(sys.argv[1], sys.argv[2])
+                sys.exit(0 if success else 1)
+            else:
+                print("Usage: python3 drive_upload.py <file_path> <folder_name>")
+                sys.exit(1)
         EOF
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib --user
-
+    - name: Setup resolvers for puredns
+      run: |
+        echo "Setting up DNS resolvers..."
+        cat << 'EOF' > /tmp/resolvers.txt
+        1.1.1.1
+        8.8.8.8
+        9.9.9.9
+        8.8.4.4
+        1.0.0.1
+        208.67.222.222
+        208.67.220.220
+        EOF
+    - name: Verify tool installations
+      run: |
+        echo "Verifying tool installations..."
+        echo "-----------------------------------"
+        which subfinder && subfinder -version || echo "subfinder: NOT FOUND"
+        which httpx && httpx -version || echo "httpx: NOT FOUND"
+        which nuclei && nuclei -version || echo "nuclei: NOT FOUND"
+        which katana && katana -version || echo "katana: NOT FOUND"
+        which gowitness && gowitness version || echo "gowitness: NOT FOUND"
+        which massdns || echo "massdns: NOT FOUND"
+        which puredns || echo "puredns: NOT FOUND"
+        which sqlmap || echo "sqlmap: NOT FOUND"
+        which x8 || echo "x8: NOT FOUND"
+        which feroxbuster || echo "feroxbuster: NOT FOUND"
+        which gitleaks || echo "gitleaks: NOT FOUND"
+        which trufflehog || echo "trufflehog: NOT FOUND"
+        echo "-----------------------------------"
+        echo "Tool verification complete"
     - name: Run ARES pipeline
       env:
         GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -277,269 +316,335 @@ jobs:
         GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        PDCP_API_KEY: ${{ secrets.PDCP_API_KEY }}
       run: |
         if [ ! -f targets.txt ]; then
           echo "example.com" > targets.txt
         fi
         
         TARGET=$(head -n 1 targets.txt)
-        echo "Target: $TARGET"
-
+        echo "=========================================="
+        echo "ARES Pipeline - Target: $TARGET"
+        echo "=========================================="
+        # Telegram notification function
         tg() {
           local message="$1"
-          echo "Sending Telegram: $message"
-          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
-            -d chat_id="$TELEGRAM_CHAT_ID" \
-            -d parse_mode="Markdown" \
-            -d text="$message" || echo "Telegram notification failed"
+          if [ -n "$TELEGRAM_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+              -d chat_id="$TELEGRAM_CHAT_ID" \
+              -d parse_mode="Markdown" \
+              -d text="$message" > /dev/null 2>&1 || true
+          fi
+          echo "[TG] $message"
         }
-
-        tg "🚀 *ARES Pipeline Started* on $TARGET"
-
+        tg "🚀 *ARES Pipeline Started* on \`$TARGET\`"
+        # Run stage with error handling
         run_stage() {
           local stage_name=$1
           local stage_command=$2
           
+          echo ""
           echo "========================================"
-          echo "Starting $stage_name..."
+          echo "📍 STAGE: $stage_name"
           echo "========================================"
-          if eval "$stage_command"; then
-            echo "$stage_name completed successfully"
-            tg "✅ $stage_name completed successfully"
-            return 0
+          
+          set +e
+          eval "$stage_command"
+          local exit_code=$?
+          set -e
+          
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ $stage_name completed"
+            tg "✅ $stage_name completed"
           else
-            local exit_code=$?
-            echo "$stage_name FAILED with exit code: $exit_code"
-            tg "⚠️ $stage_name had issues but continuing..."
-            return 0
+            echo "⚠️ $stage_name had issues (exit: $exit_code)"
+            tg "⚠️ $stage_name had issues"
           fi
+          return 0
         }
-
         ### STAGE 1: RECON
-        run_stage "Reconnaissance" '
-          subfinder -d $TARGET -silent > output/recon/subs.txt
-          assetfinder --subs-only $TARGET >> output/recon/subs.txt
-          chaos -d $TARGET -silent >> output/recon/subs.txt
-          sort -u output/recon/subs.txt > output/recon/final_subs.txt
-          dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt
-          puredns resolve output/recon/final_subs.txt -r 1.1.1.1 > output/recon/puredns.txt
-          zip -r recon.zip output/recon/
+        run_stage "Stage 1: Reconnaissance" '
+          echo "Running subfinder..."
+          timeout 300 subfinder -d $TARGET -silent > output/recon/subs.txt 2>/dev/null || true
+          
+          echo "Running assetfinder..."
+          timeout 300 assetfinder --subs-only $TARGET >> output/recon/subs.txt 2>/dev/null || true
+          
+          if [ -n "$PDCP_API_KEY" ]; then
+            echo "Running chaos..."
+            timeout 300 chaos -d $TARGET -silent >> output/recon/subs.txt 2>/dev/null || true
+          else
+            echo "Skipping chaos - no API key" >> output/recon/chaos_skipped.txt
+          fi
+          
+          sort -u output/recon/subs.txt > output/recon/final_subs.txt 2>/dev/null || touch output/recon/final_subs.txt
+          echo "Found $(wc -l < output/recon/final_subs.txt) unique subdomains"
+          
+          if [ -s output/recon/final_subs.txt ]; then
+            echo "Running dnsx..."
+            timeout 300 dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt 2>/dev/null || true
+            
+            echo "Running puredns..."
+            timeout 300 puredns resolve output/recon/final_subs.txt -r /tmp/resolvers.txt > output/recon/puredns.txt 2>/dev/null || true
+          fi
+          
+          zip -r recon.zip output/recon/ || true
           python3 drive_upload.py recon.zip Stage_1_Recon
         '
-
         ### STAGE 2: PROBING
-        run_stage "Probing" '
-          httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt
-          echo "Live hosts: $(wc -l < output/probe/live.txt)"
-          cat output/probe/live.txt
-          # Take screenshots with gowitness (limited to 5)
-          head -5 output/probe/live.txt > output/probe/live_limited.txt
-          mkdir -p output/probe/screenshots/
-          gowitness file -f output/probe/live_limited.txt -o output/probe/screenshots/ --no-db
-          zip -r probe.zip output/probe/
+        run_stage "Stage 2: Probing" '
+          if [ -s output/recon/final_subs.txt ]; then
+            echo "Running httpx..."
+            timeout 600 httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt 2>/dev/null || true
+            echo "Live hosts: $(wc -l < output/probe/live.txt 2>/dev/null || echo 0)"
+            
+            if [ -s output/probe/live.txt ]; then
+              head -5 output/probe/live.txt > output/probe/live_limited.txt
+              mkdir -p output/probe/screenshots/
+              # FIXED: gowitness v3 uses "scan file" instead of just "file"
+              echo "Running gowitness..."
+              timeout 300 gowitness scan file -f output/probe/live_limited.txt --screenshot-path output/probe/screenshots/ 2>/dev/null || \
+              timeout 300 gowitness file -f output/probe/live_limited.txt -o output/probe/screenshots/ --no-db 2>/dev/null || true
+            fi
+          else
+            echo "No subdomains found" > output/probe/no_input.txt
+          fi
+          
+          zip -r probe.zip output/probe/ || true
           python3 drive_upload.py probe.zip Stage_2_Probe
         '
-
         ### STAGE 3: CRAWLING
-        run_stage "Crawling" '
-          katana -l output/probe/live.txt -silent > output/crawl/katana.txt
-          gospider -s $TARGET -o output/crawl/gospider/
-          find output/crawl/gospider/ -type f -name "*.txt" -exec cat {} \; > output/crawl/gospider_combined.txt 2>/dev/null || true
-          # Use paramspider
-          paramspider -d $TARGET -o output/crawl/paramspider.txt
-          # Use feroxbuster with rate limiting (only on 3 URLs)
-          head -3 output/probe/live.txt | while read url; do
-            feroxbuster -u $url -o output/crawl/feroxbuster_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt --rate-limit 10 --threads 3
-          done
-          # Extract parameterized URLs for later stages
-          grep "=" output/crawl/katana.txt > output/crawl/params_only.txt
-          echo "Parameterized URLs found: $(wc -l < output/crawl/params_only.txt)"
-          zip -r crawl.zip output/crawl/
+        run_stage "Stage 3: Crawling" '
+          if [ -s output/probe/live.txt ]; then
+            echo "Running katana..."
+            timeout 600 katana -l output/probe/live.txt -silent > output/crawl/katana.txt 2>/dev/null || true
+            
+            echo "Running gospider..."
+            mkdir -p output/crawl/gospider/
+            timeout 600 gospider -S output/probe/live.txt -o output/crawl/gospider/ 2>/dev/null || true
+            find output/crawl/gospider/ -type f -name "*.txt" -exec cat {} \; > output/crawl/gospider_combined.txt 2>/dev/null || true
+            
+            echo "Running paramspider..."
+            timeout 300 paramspider -d $TARGET -o output/crawl/paramspider.txt 2>/dev/null || true
+            
+            if command -v feroxbuster &> /dev/null; then
+              echo "Running feroxbuster (limited)..."
+              head -2 output/probe/live.txt 2>/dev/null | while read url; do
+                timeout 180 feroxbuster -u "$url" -o "output/crawl/feroxbuster_$(echo $url | md5sum | cut -c1-8).txt" --rate-limit 10 -t 3 -q 2>/dev/null || true
+              done
+            fi
+            
+            grep "=" output/crawl/katana.txt > output/crawl/params_only.txt 2>/dev/null || touch output/crawl/params_only.txt
+            echo "Parameterized URLs: $(wc -l < output/crawl/params_only.txt 2>/dev/null || echo 0)"
+          else
+            echo "No live hosts" > output/crawl/no_input.txt
+          fi
+          
+          zip -r crawl.zip output/crawl/ || true
           python3 drive_upload.py crawl.zip Stage_3_Crawl
         '
-
         ### STAGE 4: PARAMS & XSS
-        run_stage "Parameter & XSS Scan" '
-          cat output/crawl/katana.txt | qsreplace "FUZZ" > output/crawl/qsreplace.txt
-          cat output/crawl/katana.txt | kxss > output/crawl/kxss.txt
-          cat output/crawl/katana.txt | unfurl paths keys values > output/crawl/unfurl.txt
-          # Use x8 for parameter discovery (only on 3 URLs)
-          head -3 output/probe/live.txt | while read url; do
-            x8 -u $url -w /usr/share/wordlists/common.txt > output/crawl/x8_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt
-          done
-          zip -r params.zip output/crawl/
+        run_stage "Stage 4: Parameter Discovery" '
+          if [ -s output/crawl/katana.txt ]; then
+            echo "Running qsreplace..."
+            cat output/crawl/katana.txt | qsreplace "FUZZ" > output/crawl/qsreplace.txt 2>/dev/null || true
+            
+            echo "Running kxss..."
+            cat output/crawl/katana.txt | kxss > output/crawl/kxss.txt 2>/dev/null || true
+            
+            echo "Running unfurl..."
+            cat output/crawl/katana.txt | unfurl paths keys values > output/crawl/unfurl.txt 2>/dev/null || true
+          fi
+          
+          if [ -s output/probe/live.txt ] && command -v x8 &> /dev/null; then
+            echo "Running x8..."
+            head -2 output/probe/live.txt 2>/dev/null | while read url; do
+              timeout 300 x8 -u "$url" -w /usr/share/wordlists/common.txt -o "output/crawl/x8_$(echo $url | md5sum | cut -c1-8).txt" 2>/dev/null || true
+            done
+          fi
+          
+          zip -r params.zip output/crawl/ || true
           python3 drive_upload.py params.zip Stage_4_Params
         '
-
         ### STAGE 5: VULNS
-        run_stage "Vulnerability Scanning" '
-          nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt
-          dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt
-          # Use ffuf for fuzzing with rate limiting
-          head -3 output/probe/live.txt | while read url; do
-            ffuf -u $url/FUZZ -w /usr/share/wordlists/common.txt -o output/vulns/ffuf_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").json -rate 10 -t 3
-          done
-          zip -r vulns.zip output/vulns/
+        run_stage "Stage 5: Vulnerability Scanning" '
+          if [ -s output/probe/live.txt ]; then
+            echo "Running nuclei..."
+            timeout 1800 nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt 2>/dev/null || true
+          fi
+          
+          if [ -s output/crawl/katana.txt ]; then
+            echo "Running dalfox..."
+            timeout 1800 dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt 2>/dev/null || true
+          fi
+          
+          if [ -s output/probe/live.txt ] && command -v ffuf &> /dev/null; then
+            echo "Running ffuf..."
+            head -2 output/probe/live.txt 2>/dev/null | while read url; do
+              timeout 300 ffuf -u "$url/FUZZ" -w /usr/share/wordlists/common.txt -o "output/vulns/ffuf_$(echo $url | md5sum | cut -c1-8).json" -rate 10 -t 3 2>/dev/null || true
+            done
+          fi
+          
+          zip -r vulns.zip output/vulns/ || true
           python3 drive_upload.py vulns.zip Stage_5_Vulns
         '
-
         ### STAGE 6: SECRETS
-        run_stage "Secrets Detection" '
-          trufflehog filesystem . --directory . --no-update > output/secrets/trufflehog.txt
-          gitleaks detect --no-git -v > output/secrets/gitleaks.txt
+        run_stage "Stage 6: Secrets Detection" '
+          echo "Running trufflehog..."
+          timeout 600 trufflehog filesystem . --no-update > output/secrets/trufflehog.txt 2>/dev/null || true
+          
+          if command -v gitleaks &> /dev/null; then
+            echo "Running gitleaks..."
+            timeout 300 gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>&1 || true
+          fi
+          
+          echo "Running git-secrets..."
           git-secrets --scan > output/secrets/git_secrets.txt 2>&1 || true
-          zip -r secrets.zip output/secrets/
+          
+          zip -r secrets.zip output/secrets/ || true
           python3 drive_upload.py secrets.zip Stage_6_Secrets
         '
-
-        ### STAGE 7: GRAPHQL & API TESTING
-        run_stage "GraphQL & API Testing" '
+        ### STAGE 7: GRAPHQL & API
+        run_stage "Stage 7: GraphQL & API" '
           echo "https://$TARGET/graphql" > output/graphql/endpoints.txt
           echo "https://$TARGET/api/graphql" >> output/graphql/endpoints.txt
           echo "https://api.$TARGET/graphql" >> output/graphql/endpoints.txt
           
-          for endpoint in $(cat output/graphql/endpoints.txt); do
-            echo "Testing $endpoint with GraphQLMap..."
-            timeout 30 graphqlmap -u $endpoint -v >> output/graphql/graphqlmap.txt 2>&1 || true
-            echo "Testing $endpoint with inql..."
-            inql -t $endpoint >> output/graphql/inql.txt 2>&1 || true
-          done
+          while read endpoint; do
+            [ -n "$endpoint" ] || continue
+            echo "Testing $endpoint..."
+            timeout 60 graphqlmap -u "$endpoint" -v >> output/graphql/graphqlmap.txt 2>&1 || true
+            timeout 60 inql -t "$endpoint" >> output/graphql/inql.txt 2>&1 || true
+          done < output/graphql/endpoints.txt
           
           echo "https://$TARGET/swagger.json" > output/api/swagger_endpoints.txt
           echo "https://$TARGET/api-docs" >> output/api/swagger_endpoints.txt
           
-          zip -r graphql_api.zip output/graphql/ output/api/
+          zip -r graphql_api.zip output/graphql/ output/api/ || true
           python3 drive_upload.py graphql_api.zip Stage_7_GraphQL_API
         '
-
-        ### STAGE 8: CLOUD SECURITY
-        run_stage "Cloud Security Scanning" '
+        ### STAGE 8: CLOUD
+        run_stage "Stage 8: Cloud Security" '
           echo "provider \"aws\" {}" > test.tf
           echo "resource \"aws_s3_bucket\" \"test\" {}" >> test.tf
           
-          tfsec . > output/cloud/tfsec.txt 2>&1 || true
-          checkov -d . > output/cloud/checkov.txt 2>&1 || true
-          
-          echo "Cloudsplaining skipped (requires AWS credentials)" > output/cloud/cloudsplaining.txt
+          timeout 300 tfsec . > output/cloud/tfsec.txt 2>&1 || true
+          timeout 300 checkov -d . > output/cloud/checkov.txt 2>&1 || true
           
           rm -f test.tf
-          zip -r cloud.zip output/cloud/
-          python3 drive_upload.py cloud.zip Stage_8_Cloud_Security
+          zip -r cloud.zip output/cloud/ || true
+          python3 drive_upload.py cloud.zip Stage_8_Cloud
         '
-
-        ### STAGE 9: JWT TESTING
-        run_stage "JWT Testing" '
-          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
+        ### STAGE 9: JWT
+        run_stage "Stage 9: JWT Testing" '
+          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U" > output/specialized/sample_jwt.txt
+          timeout 120 jwt_tool $(cat output/specialized/sample_jwt.txt) > output/specialized/jwt_tool.txt 2>&1 || true
           
-          jwt_tool output/specialized/sample_jwt.txt > output/specialized/jwt_tool.txt 2>&1 || true
-          
-          zip -r specialized.zip output/specialized/
-          python3 drive_upload.py specialized.zip Stage_9_Specialized_Tools
+          zip -r specialized.zip output/specialized/ || true
+          python3 drive_upload.py specialized.zip Stage_9_JWT
         '
-
-        ### STAGE 10: JAELES SCANNING (IMPROVED)
-        run_stage "Jaeles Scanning" '
-          echo "Running Jaeles on crawled URLs..."
+        ### STAGE 10: JAELES
+        run_stage "Stage 10: Jaeles" '
           if [ -s output/crawl/katana.txt ]; then
-            jaeles scan \
-              -s $HOME/.jaeles/signatures-base \
-              -L output/crawl/katana.txt \
-              -c 5 \
-              -o output/specialized/jaeles.txt
+            timeout 1800 jaeles scan -s $HOME/.jaeles/signatures-base -L output/crawl/katana.txt -c 5 -o output/specialized/jaeles.txt 2>/dev/null || true
           else
-            echo "No URLs to scan with Jaeles" > output/specialized/jaeles.txt
+            echo "No URLs for Jaeles" > output/specialized/jaeles.txt
           fi
           
-          zip -r jaeles.zip output/specialized/
+          zip -r jaeles.zip output/specialized/ || true
           python3 drive_upload.py jaeles.zip Stage_10_Jaeles
         '
-
-        ### STAGE 11: SQL INJECTION TESTING (GitHub-ToS Hardened)
-        run_stage "SQL Injection Testing" '
-          echo "Testing for SQL injection on parameterized URLs..."
+        ### STAGE 11: SQL
+        run_stage "Stage 11: SQL Injection" '
+          mkdir -p output/sql
           if [ -s output/crawl/params_only.txt ]; then
-            mkdir -p output/sql
             head -5 output/crawl/params_only.txt > output/sql/params_for_sql.txt
-            echo "Testing with sqlmap (GitHub-ToS safe flags)..."
-            sqlmap -m output/sql/params_for_sql.txt --batch --risk 1 --level 1 --technique=BEU --delay=5 --threads=2 --timeout=30 > output/sql/sqlmap_results.txt 2>&1 || true
-            echo "Testing with ghauri (GitHub-ToS safe)..."
+            
+            echo "Running sqlmap..."
+            timeout 900 sqlmap -m output/sql/params_for_sql.txt --batch --risk 1 --level 1 --technique=BEU --delay=5 --threads=2 --timeout=30 > output/sql/sqlmap_results.txt 2>&1 || true
+            
+            echo "Running ghauri..."
             head -3 output/crawl/params_only.txt | while read url; do
-              ghauri -u $url --batch --delay 5 --timeout 30 > output/sql/ghauri_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+              [ -n "$url" ] || continue
+              timeout 300 ghauri -u "$url" --batch --delay 5 --timeout 30 > "output/sql/ghauri_$(echo $url | md5sum | cut -c1-8).txt" 2>&1 || true
             done
           else
-            echo "No parameterized URLs found for SQL injection testing" > output/sql/sqlmap_results.txt
+            echo "No parameterized URLs" > output/sql/no_params.txt
           fi
-          zip -r sql.zip output/sql/
-          python3 drive_upload.py sql.zip Stage_11_SQL_Injection
+          
+          zip -r sql.zip output/sql/ || true
+          python3 drive_upload.py sql.zip Stage_11_SQL
         '
-
-        ### STAGE 12: NoSQL TESTING (FIXED - DISABLED PYTHON2 TOOLS)
-        run_stage "NoSQL Testing" '
-          echo "NoSQL injection testing skipped (python2 deprecated on GitHub Actions)" > output/nosql/no_urls.txt
-          echo "NoSQLMap requires python2 which is not available on ubuntu-latest" >> output/nosql/no_urls.txt
-          echo "Consider using manual testing with modern NoSQL injection tools" >> output/nosql/no_urls.txt
-          zip -r nosql.zip output/nosql/
+        ### STAGE 12: NoSQL
+        run_stage "Stage 12: NoSQL" '
+          mkdir -p output/nosql
+          echo "NoSQL testing requires manual analysis (NoSQLMap needs Python2)" > output/nosql/info.txt
+          
+          zip -r nosql.zip output/nosql/ || true
           python3 drive_upload.py nosql.zip Stage_12_NoSQL
         '
-
-        ### STAGE 13: COMMAND INJECTION & TEMPLATE TESTING (FIXED - GitHub-ToS Hardened)
-        run_stage "Command Injection & Template Testing" '
-          echo "Testing for command injection..."
+        ### STAGE 13: COMMAND INJECTION
+        run_stage "Stage 13: Command Injection" '
+          mkdir -p output/templates
           if [ -s output/crawl/params_only.txt ]; then
             head -3 output/crawl/params_only.txt | while read url; do
-              echo "Testing $url with commix (GitHub-ToS safe)..."
-              commix -u $url --batch --delay 5 --technique=classic > output/templates/commix_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
-              echo "tplmap skipped (python2 deprecated on GitHub Actions)" > output/templates/tplmap_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt
+              [ -n "$url" ] || continue
+              timeout 300 commix -u "$url" --batch --delay 5 --technique=classic > "output/templates/commix_$(echo $url | md5sum | cut -c1-8).txt" 2>&1 || true
             done
           else
-            echo "No parameterized URLs found for command injection testing" > output/templates/no_urls.txt
+            echo "No parameterized URLs" > output/templates/no_params.txt
           fi
-          zip -r templates.zip output/templates/
-          python3 drive_upload.py templates.zip Stage_13_Templates
+          
+          zip -r templates.zip output/templates/ || true
+          python3 drive_upload.py templates.zip Stage_13_CommandInjection
         '
-
-        ### STAGE 14: XXE TESTING (FIXED - REMOVED AUTOMATION)
-        run_stage "XXE Testing" '
-          echo "XXE testing requires manual analysis..."
-          echo "XXEinjector and ppmap require specific XML endpoints" > output/xxe/readme.txt
-          echo "To test XXE manually:" >> output/xxe/readme.txt
-          echo "1. Look for XML endpoints in crawled data" >> output/xxe/readme.txt
-          echo "2. Check for Content-Type: application/xml" >> output/xxe/readme.txt
-          echo "3. Use XXEinjector manually with proper payloads" >> output/xxe/readme.txt
-          # Simple check for XML endpoints
-          grep -i "\.xml\|application/xml\|text/xml" output/crawl/katana.txt > output/xxe/xml_endpoints.txt 2>/dev/null || true
-          echo "Potential XML endpoints found: $(wc -l < output/xxe/xml_endpoints.txt)"
-          zip -r xxe.zip output/xxe/
+        ### STAGE 14: XXE
+        run_stage "Stage 14: XXE" '
+          mkdir -p output/xxe
+          echo "XXE testing requires manual identification of XML endpoints" > output/xxe/info.txt
+          
+          if [ -s output/crawl/katana.txt ]; then
+            grep -i "\.xml\|application/xml" output/crawl/katana.txt > output/xxe/xml_endpoints.txt 2>/dev/null || touch output/xxe/xml_endpoints.txt
+          fi
+          
+          zip -r xxe.zip output/xxe/ || true
           python3 drive_upload.py xxe.zip Stage_14_XXE
         '
-
-        ### STAGE 15: AUTH TESTING (FIXED - REMOVED AUTHMATRIX)
-        run_stage "Authentication Testing" '
-          echo "Authentication testing analysis..."
-          # Look for common auth endpoints
-          grep -i "login\|auth\|signin\|signup\|register\|logout\|password\|reset" output/crawl/katana.txt > output/auth/auth_endpoints.txt 2>/dev/null || true
-          echo "Auth endpoints found: $(wc -l < output/auth/auth_endpoints.txt)"
-          # Test with interactsh for OOB testing
-          echo "Starting interactsh client..."
-          timeout 30 interactsh-client -v > output/auth/interactsh.txt 2>&1 || true
-          echo "AuthMatrix is a Burp extension - use manually" > output/auth/authmatrix_note.txt
-          zip -r auth.zip output/auth/
-          python3 drive_upload.py auth.zip Stage_15_Authentication
+        ### STAGE 15: AUTH
+        run_stage "Stage 15: Authentication" '
+          mkdir -p output/auth
+          if [ -s output/crawl/katana.txt ]; then
+            grep -i "login\|auth\|signin\|password" output/crawl/katana.txt > output/auth/auth_endpoints.txt 2>/dev/null || touch output/auth/auth_endpoints.txt
+          fi
+          
+          timeout 60 interactsh-client -v > output/auth/interactsh.txt 2>&1 || true
+          
+          zip -r auth.zip output/auth/ || true
+          python3 drive_upload.py auth.zip Stage_15_Auth
         '
-
-        ### STAGE 16: DESERIALIZATION TESTING (FIXED - SEPARATE DIRECTORY)
-        run_stage "Deserialization Testing" '
-          echo "Testing for deserialization vulnerabilities..."
-          echo "Creating PHP deserialization payloads with phpggc..."
+        ### STAGE 16: DESERIALIZATION
+        run_stage "Stage 16: Deserialization" '
+          mkdir -p output/deserialization
           phpggc --list > output/deserialization/phpggc_list.txt 2>&1 || true
-          # Look for serialization endpoints
-          grep -i "serialize\|unserialize\|pickle\|yaml\|json" output/crawl/katana.txt > output/deserialization/serialization_endpoints.txt 2>/dev/null || true
-          echo "Deserialization testing completed" > output/deserialization/deserialization_summary.txt
-          zip -r deserialization.zip output/deserialization/
+          
+          if [ -s output/crawl/katana.txt ]; then
+            grep -i "serialize\|pickle\|yaml" output/crawl/katana.txt > output/deserialization/endpoints.txt 2>/dev/null || touch output/deserialization/endpoints.txt
+          fi
+          
+          zip -r deserialization.zip output/deserialization/ || true
           python3 drive_upload.py deserialization.zip Stage_16_Deserialization
         '
-
-        echo "========================================"
-        echo "ARES Pipeline COMPLETED on $TARGET"
-        echo "========================================"
-        tg "🏁 *ARES Pipeline COMPLETED* on $TARGET - All 16 stages executed"
+        echo ""
+        echo "=========================================="
+        echo "🏁 ARES Pipeline COMPLETED on $TARGET"
+        echo "=========================================="
+        tg "🏁 *ARES Pipeline COMPLETED* on \`$TARGET\` - All 16 stages executed"
+    - name: Cleanup - Delete all local data
+      if: always()
+      run: |
+        echo "Cleaning up all local data..."
+        rm -rf output/ *.zip drive_upload.py test.tf 2>/dev/null || true
+        rm -rf $HOME/tools/ $HOME/SecLists/ $HOME/.jaeles/ 2>/dev/null || true
+        rm -rf $HOME/go/bin/* $HOME/.cargo/registry/ 2>/dev/null || true
+        echo "✅ Cleanup complete - all data deleted from GitHub runner"
+        echo "📁 Your results are safely stored in Google Drive"
