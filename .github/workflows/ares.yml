@@ -37,17 +37,16 @@ jobs:
         go install github.com/hakluke/hakrawler@latest
         go install github.com/tomnomnom/qsreplace@latest
         go install github.com/tomnomnom/unfurl@latest
-        go install github.com/tomnomnom/paramspider@latest
         go install github.com/Emoe/kxss@latest
 
     - name: Download binary tools
       run: |
-        # gospider binary
+        # gospider
         curl -LO https://github.com/hakluke/gospider/releases/latest/download/gospider-linux
         chmod +x gospider-linux
         sudo mv gospider-linux /usr/local/bin/gospider
 
-        # findomain binary
+        # findomain precompiled
         curl -LO https://github.com/Findomain/Findomain/releases/latest/download/findomain-linux
         chmod +x findomain-linux
         sudo mv findomain-linux /usr/local/bin/findomain
@@ -141,8 +140,7 @@ jobs:
         gospider -s $TARGET -o output/crawl/gospider.txt || true
         qsreplace -w output/crawl/katana.txt > output/crawl/qsreplace.txt || true
         unfurl -u $TARGET > output/crawl/unfurl.txt || true
-        paramspider -d $TARGET -o output/crawl/params.txt || true
-        kxss -list output/crawl/params.txt > output/crawl/kxss.txt || true
+        kxss -list output/crawl/katana.txt > output/crawl/kxss.txt || true
         zip -j crawl.zip output/crawl/*
         python3 drive_upload.py crawl.zip Stage_3_Crawl
         tg "✅ Crawling finished"
