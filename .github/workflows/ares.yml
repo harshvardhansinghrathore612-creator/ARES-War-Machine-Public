@@ -203,13 +203,34 @@ jobs:
         git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base
     - name: Install binaries
       run: |
-        # gitleaks
-        GITLEAKS_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep "browser_download_url.*linux_x64.tar.gz" | head -1 | cut -d '"' -f 4)
-        curl -sL "$GITLEAKS_URL" -o gitleaks.tar.gz && tar -xzf gitleaks.tar.gz && sudo mv gitleaks /usr/local/bin/ && rm -f gitleaks.tar.gz
+        # Install jq for JSON parsing
+        sudo apt-get install -y jq
+        
+        # gitleaks - use jq for reliable parsing
+        echo "Installing gitleaks..."
+        GITLEAKS_URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r '.assets[] | select(.name | test("linux_x64.tar.gz$")) | .browser_download_url' | head -1)
+        if [ -n "$GITLEAKS_URL" ] && [ "$GITLEAKS_URL" != "null" ]; then
+          curl -sL "$GITLEAKS_URL" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz
+          sudo mv gitleaks /usr/local/bin/ 2>/dev/null || true
+          rm -f gitleaks.tar.gz LICENSE README.md
+          echo "✅ gitleaks installed"
+        else
+          echo "⚠️ Could not download gitleaks, skipping..."
+        fi
         
         # Feroxbuster
-        FEROX_URL=$(curl -s https://api.github.com/repos/epi052/feroxbuster/releases/latest | grep "browser_download_url.*x86_64-linux-musl.tar.gz" | head -1 | cut -d '"' -f 4)
-        curl -sL "$FEROX_URL" -o ferox.tar.gz && tar -xzf ferox.tar.gz && sudo mv feroxbuster /usr/local/bin/ && rm -f ferox.tar.gz
+        echo "Installing feroxbuster..."
+        FEROX_URL=$(curl -s https://api.github.com/repos/epi052/feroxbuster/releases/latest | jq -r '.assets[] | select(.name | test("x86_64-linux-musl.tar.gz$")) | .browser_download_url' | head -1)
+        if [ -n "$FEROX_URL" ] && [ "$FEROX_URL" != "null" ]; then
+          curl -sL "$FEROX_URL" -o ferox.tar.gz
+          tar -xzf ferox.tar.gz
+          sudo mv feroxbuster /usr/local/bin/ 2>/dev/null || true
+          rm -f ferox.tar.gz
+          echo "✅ feroxbuster installed"
+        else
+          echo "⚠️ Could not download feroxbuster, skipping..."
+        fi
     - name: Install SQLMap
       run: |
         git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git $HOME/tools/sqlmap
