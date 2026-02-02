@@ -1,24 +1,31 @@
 name: ARES – GitHub Safe Vulnerability Pipeline
+
 on:
   workflow_dispatch:
+
 env:
   GOPATH: /home/runner/go
   GO111MODULE: "on"
+
 jobs:
   security-hunt:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+
     steps:
     - name: Checkout Repo
       uses: actions/checkout@v4
+
     - name: Clean previous data
       run: |
         rm -rf output *.zip || true
         mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud,sql,nosql,xxe,auth,templates,deserialization,ssrf,lfi,redirect,crlf,takeover}
+
     - name: Install Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.23'
+
     - name: Install core dependencies
       run: |
         sudo apt-get update
@@ -29,16 +36,19 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
         mkdir -p $HOME/tools
+
     - name: Install Rust
       run: |
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
         source $HOME/.cargo/env
         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
     - name: Install massdns
       run: |
         git clone --depth 1 https://github.com/blechschmidt/massdns.git $HOME/tools/massdns
         cd $HOME/tools/massdns && make
         sudo cp bin/massdns /usr/local/bin/
+
     - name: Install SecLists
       run: |
         git clone --depth 1 https://github.com/danielmiessler/SecLists.git $HOME/SecLists
@@ -47,6 +57,7 @@ jobs:
         sudo ln -sf $HOME/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt /usr/share/wordlists/dirb-medium.txt
         sudo ln -sf $HOME/SecLists/Discovery/Web-Content/raft-large-words.txt /usr/share/wordlists/raft-large.txt
         sudo ln -sf $HOME/SecLists/Fuzzing/LFI/LFI-Jhaddix.txt /usr/share/wordlists/lfi.txt
+
     - name: Install Go tools - Core Recon
       run: |
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
@@ -61,6 +72,7 @@ jobs:
         go install -v github.com/tomnomnom/qsreplace@latest
         go install -v github.com/tomnomnom/unfurl@latest
         go install -v github.com/jaeles-project/gospider@latest
+
     - name: Install Go tools - Vulnerability Scanners
       run: |
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
@@ -69,6 +81,7 @@ jobs:
         go install -v github.com/Emoe/kxss@latest
         go install -v github.com/ffuf/ffuf/v2@latest
         go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
+
     - name: Install Go tools - Additional Scanners
       run: |
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
@@ -80,6 +93,7 @@ jobs:
         go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
         # gf - pattern matcher
         go install -v github.com/tomnomnom/gf@latest
+
     - name: Install Go tools - Cloud & Other
       run: |
         export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
@@ -89,6 +103,7 @@ jobs:
         go install -v github.com/sensepost/gowitness@latest
         go install -v github.com/jaeles-project/jaeles@latest
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
+
     - name: Verify Go tools installation
       run: |
         echo "=== Verifying Go Tools ==="
@@ -103,10 +118,12 @@ jobs:
         which naabu && naabu -version
         which gowitness && gowitness --help | head -1
         echo "=== All Go tools verified ==="
+
     - name: Install Python tools
       run: |
         pip3 install --upgrade pip --user
         pip3 install arjun checkov s3scanner swagger-parser commix --user
+
     - name: Install XSStrike
       run: |
         git clone --depth 1 https://github.com/s0md3v/XSStrike.git $HOME/tools/XSStrike
@@ -114,6 +131,7 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/xsstrike
         echo "python3 $HOME/tools/XSStrike/xsstrike.py \"\$@\"" | sudo tee -a /usr/local/bin/xsstrike
         sudo chmod +x /usr/local/bin/xsstrike
+
     - name: Install OpenRedireX
       run: |
         git clone --depth 1 https://github.com/devanshbatham/OpenRedireX.git $HOME/tools/OpenRedireX
@@ -122,6 +140,7 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/openredirex
         echo "python3 $HOME/tools/OpenRedireX/openredirex.py \"\$@\"" | sudo tee -a /usr/local/bin/openredirex
         sudo chmod +x /usr/local/bin/openredirex
+
     - name: Install SSRFmap
       run: |
         git clone --depth 1 https://github.com/swisskyrepo/SSRFmap.git $HOME/tools/SSRFmap
@@ -130,6 +149,7 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/ssrfmap
         echo "python3 $HOME/tools/SSRFmap/ssrfmap.py \"\$@\"" | sudo tee -a /usr/local/bin/ssrfmap
         sudo chmod +x /usr/local/bin/ssrfmap
+
     - name: Install Oralyzer
       run: |
         git clone --depth 1 https://github.com/r0075h3ll/Oralyzer.git $HOME/tools/Oralyzer
@@ -138,14 +158,17 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/oralyzer
         echo "python3 $HOME/tools/Oralyzer/oralyzer.py \"\$@\"" | sudo tee -a /usr/local/bin/oralyzer
         sudo chmod +x /usr/local/bin/oralyzer
+
     - name: Install x8 (Rust)
       run: |
         source $HOME/.cargo/env
         cargo install x8
+
     - name: Install git-secrets
       run: |
         git clone --depth 1 https://github.com/awslabs/git-secrets.git $HOME/tools/git-secrets
         cd $HOME/tools/git-secrets && sudo make install
+
     - name: Install paramspider
       run: |
         git clone --depth 1 https://github.com/devanshbatham/paramspider.git $HOME/tools/paramspider
@@ -154,6 +177,7 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/paramspider
         echo "python3 -m paramspider \"\$@\"" | sudo tee -a /usr/local/bin/paramspider
         sudo chmod +x /usr/local/bin/paramspider
+
     - name: Install ghauri
       run: |
         git clone --depth 1 https://github.com/r0oth3x49/ghauri.git $HOME/tools/ghauri
@@ -163,12 +187,14 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/ghauri
         echo "cd $HOME/tools/ghauri && python3 -m ghauri \"\$@\"" | sudo tee -a /usr/local/bin/ghauri
         sudo chmod +x /usr/local/bin/ghauri
+
     - name: Install phpggc
       run: |
         git clone --depth 1 https://github.com/ambionics/phpggc.git $HOME/tools/phpggc
         echo '#!/bin/bash' | sudo tee /usr/local/bin/phpggc
         echo "cd $HOME/tools/phpggc && php ./phpggc \"\$@\"" | sudo tee -a /usr/local/bin/phpggc
         sudo chmod +x /usr/local/bin/phpggc
+
     - name: Install JWT Tool
       run: |
         git clone --depth 1 https://github.com/ticarpi/jwt_tool.git $HOME/tools/jwt_tool
@@ -176,6 +202,7 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/jwt_tool
         echo "cd $HOME/tools/jwt_tool && python3 jwt_tool.py \"\$@\"" | sudo tee -a /usr/local/bin/jwt_tool
         sudo chmod +x /usr/local/bin/jwt_tool
+
     - name: Install TruffleHog
       run: |
         TRUFFLEHOG_URL=$(curl -s https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | head -1 | cut -d '"' -f 4)
@@ -183,6 +210,7 @@ jobs:
         tar -xzf trufflehog.tar.gz && chmod +x trufflehog
         sudo mv trufflehog /usr/local/bin/
         rm -f trufflehog.tar.gz
+
     - name: Install GraphQLMap
       run: |
         git clone --depth 1 https://github.com/swisskyrepo/GraphQLmap.git $HOME/tools/GraphQLmap
@@ -190,17 +218,20 @@ jobs:
         echo '#!/bin/bash' | sudo tee /usr/local/bin/graphqlmap
         echo "cd $HOME/tools/GraphQLmap && python3 graphqlmap.py \"\$@\"" | sudo tee -a /usr/local/bin/graphqlmap
         sudo chmod +x /usr/local/bin/graphqlmap
+
     - name: Install inql
       run: |
         pip3 install inql --user
         echo '#!/bin/bash' | sudo tee /usr/local/bin/inql
         echo 'python3 -c "from inql.cli import main; main()" "$@"' | sudo tee -a /usr/local/bin/inql
         sudo chmod +x /usr/local/bin/inql
+
     - name: Setup Jaeles signatures
       run: |
         mkdir -p $HOME/.jaeles
         jaeles config init || true
         git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base
+
     - name: Install binaries
       run: |
         # Install jq for JSON parsing
@@ -219,42 +250,56 @@ jobs:
           echo "⚠️ Could not download gitleaks, skipping..."
         fi
         
-        # Feroxbuster
+        # Feroxbuster - different archive structure
         echo "Installing feroxbuster..."
-        FEROX_URL=$(curl -s https://api.github.com/repos/epi052/feroxbuster/releases/latest | jq -r '.assets[] | select(.name | test("x86_64-linux-musl.tar.gz$")) | .browser_download_url' | head -1)
+        FEROX_URL=$(curl -s https://api.github.com/repos/epi052/feroxbuster/releases/latest | jq -r '.assets[] | select(.name | contains("x86_64") and contains("linux") and contains("musl") and (contains(".tar.gz") or contains(".zip"))) | .browser_download_url' | head -1)
         if [ -n "$FEROX_URL" ] && [ "$FEROX_URL" != "null" ]; then
           curl -sL "$FEROX_URL" -o ferox.tar.gz
-          tar -xzf ferox.tar.gz
-          sudo mv feroxbuster /usr/local/bin/ 2>/dev/null || true
+          tar -xzf ferox.tar.gz 2>/dev/null || unzip -o ferox.tar.gz 2>/dev/null || true
+          sudo mv feroxbuster /usr/local/bin/ 2>/dev/null || sudo mv */feroxbuster /usr/local/bin/ 2>/dev/null || true
           rm -f ferox.tar.gz
           echo "✅ feroxbuster installed"
         else
-          echo "⚠️ Could not download feroxbuster, skipping..."
+          # Fallback: install via cargo
+          echo "Trying cargo install for feroxbuster..."
+          source $HOME/.cargo/env 2>/dev/null || true
+          cargo install feroxbuster 2>/dev/null && echo "✅ feroxbuster installed via cargo" || echo "⚠️ feroxbuster not installed"
         fi
+
     - name: Install SQLMap
       run: |
         git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git $HOME/tools/sqlmap
         echo '#!/bin/bash' | sudo tee /usr/local/bin/sqlmap
         echo "python3 $HOME/tools/sqlmap/sqlmap.py \"\$@\"" | sudo tee -a /usr/local/bin/sqlmap
         sudo chmod +x /usr/local/bin/sqlmap
+
     - name: Install XXEinjector
       run: |
         git clone --depth 1 https://github.com/enjoiz/XXEinjector.git $HOME/tools/XXEinjector
         echo '#!/bin/bash' | sudo tee /usr/local/bin/xxeinjector
         echo "cd $HOME/tools/XXEinjector && ruby XXEinjector.rb \"\$@\"" | sudo tee -a /usr/local/bin/xxeinjector
         sudo chmod +x /usr/local/bin/xxeinjector
+
     - name: Install ppmap
       run: |
         git clone --depth 1 https://github.com/kleiton0x00/ppmap.git $HOME/tools/ppmap
-        cd $HOME/tools/ppmap && pip3 install -r requirements.txt --user
+        cd $HOME/tools/ppmap
+        # Install dependencies if requirements.txt exists, otherwise install common deps
+        if [ -f requirements.txt ]; then
+          pip3 install -r requirements.txt --user
+        else
+          pip3 install requests argparse colorama --user
+        fi
         echo '#!/bin/bash' | sudo tee /usr/local/bin/ppmap
         echo "cd $HOME/tools/ppmap && python3 ppmap.py \"\$@\"" | sudo tee -a /usr/local/bin/ppmap
         sudo chmod +x /usr/local/bin/ppmap
+
     - name: Setup gf patterns
       run: |
         mkdir -p $HOME/.gf
         git clone --depth 1 https://github.com/1ndianl33t/Gf-Patterns.git $HOME/tools/gf-patterns
         cp $HOME/tools/gf-patterns/*.json $HOME/.gf/
+
     - name: Create Drive uploader
       run: |
         cat << 'EOF' > drive_upload.py
@@ -262,6 +307,7 @@ jobs:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
+
         def upload(file_path, folder_name):
             try:
                 required_vars = ["GOOGLE_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GDRIVE_FOLDER_ID"]
@@ -291,6 +337,7 @@ jobs:
             upload(sys.argv[1], sys.argv[2]) if len(sys.argv) >= 3 else print("Usage: python3 drive_upload.py <file> <folder>")
         EOF
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib --user
+
     - name: Setup resolvers
       run: |
         cat << 'EOF' > /tmp/resolvers.txt
@@ -301,6 +348,7 @@ jobs:
         1.0.0.1
         208.67.222.222
         EOF
+
     - name: Create LFI & SSRF wordlists
       run: |
         # LFI Payloads
@@ -338,6 +386,7 @@ jobs:
         dict://localhost:11211/stat
         gopher://127.0.0.1:6379/_INFO
         EOF
+
     - name: Final verification of all tools
       run: |
         echo "=== FINAL TOOL VERIFICATION ==="
@@ -362,6 +411,7 @@ jobs:
         done
         
         echo "=== VERIFICATION COMPLETE ==="
+
     - name: Run ARES Pipeline (MAXIMUM POWER)
       env:
         GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -380,13 +430,16 @@ jobs:
         echo "=========================================="
         echo "🎯 ARES MAXIMUM POWER - Target: $TARGET"
         echo "=========================================="
+
         tg() {
           [ -n "$TELEGRAM_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] && \
           curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
             -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" > /dev/null 2>&1
           echo "[TG] $1"
         }
+
         tg "🚀 *ARES MAXIMUM POWER* started on \`$TARGET\`"
+
         run_stage() {
           echo ""
           echo "========================================"
@@ -396,6 +449,7 @@ jobs:
           [ $rc -eq 0 ] && tg "✅ $1 done" || tg "⚠️ $1 issues"
           return 0
         }
+
         ### STAGE 1: DEEP RECON
         run_stage "Stage 1: Deep Reconnaissance" '
           subfinder -d $TARGET -all -recursive -o output/recon/subfinder.txt 2>/dev/null || true
@@ -416,6 +470,7 @@ jobs:
           zip -r recon.zip output/recon/
           python3 drive_upload.py recon.zip Stage_1_Recon
         '
+
         ### STAGE 2: PROBING + PORT SCAN
         run_stage "Stage 2: Probing & Port Scan" '
           if [ -s output/recon/final_subs.txt ]; then
@@ -438,6 +493,7 @@ jobs:
           zip -r probe.zip output/probe/
           python3 drive_upload.py probe.zip Stage_2_Probe
         '
+
         ### STAGE 3: DEEP CRAWLING
         run_stage "Stage 3: Deep Crawling" '
           if [ -s output/probe/live.txt ]; then
@@ -463,6 +519,7 @@ jobs:
           zip -r crawl.zip output/crawl/
           python3 drive_upload.py crawl.zip Stage_3_Crawl
         '
+
         ### STAGE 4: PARAMETER DISCOVERY
         run_stage "Stage 4: Parameter Discovery" '
           if [ -s output/crawl/all_urls.txt ]; then
@@ -480,6 +537,7 @@ jobs:
           zip -r params.zip output/crawl/
           python3 drive_upload.py params.zip Stage_4_Params
         '
+
         ### STAGE 5: NUCLEI FULL SCAN
         run_stage "Stage 5: Nuclei Full Scan" '
           if [ -s output/probe/live.txt ]; then
@@ -489,6 +547,7 @@ jobs:
           zip -r nuclei.zip output/vulns/
           python3 drive_upload.py nuclei.zip Stage_5_Nuclei
         '
+
         ### STAGE 6: XSS HUNTING
         run_stage "Stage 6: XSS Hunting" '
           if [ -s output/crawl/params_only.txt ]; then
@@ -501,6 +560,7 @@ jobs:
           zip -r xss.zip output/vulns/
           python3 drive_upload.py xss.zip Stage_6_XSS
         '
+
         ### STAGE 7: SQL INJECTION
         run_stage "Stage 7: SQL Injection" '
           mkdir -p output/sql
@@ -513,6 +573,7 @@ jobs:
           zip -r sql.zip output/sql/
           python3 drive_upload.py sql.zip Stage_7_SQL
         '
+
         ### STAGE 8: SSRF TESTING
         run_stage "Stage 8: SSRF Testing" '
           mkdir -p output/ssrf
@@ -525,6 +586,7 @@ jobs:
           zip -r ssrf.zip output/ssrf/
           python3 drive_upload.py ssrf.zip Stage_8_SSRF
         '
+
         ### STAGE 9: LFI TESTING
         run_stage "Stage 9: LFI Testing" '
           mkdir -p output/lfi
@@ -537,6 +599,7 @@ jobs:
           zip -r lfi.zip output/lfi/
           python3 drive_upload.py lfi.zip Stage_9_LFI
         '
+
         ### STAGE 10: OPEN REDIRECT
         run_stage "Stage 10: Open Redirect" '
           mkdir -p output/redirect
@@ -548,6 +611,7 @@ jobs:
           zip -r redirect.zip output/redirect/
           python3 drive_upload.py redirect.zip Stage_10_OpenRedirect
         '
+
         ### STAGE 11: CRLF INJECTION
         run_stage "Stage 11: CRLF Injection" '
           mkdir -p output/crlf
@@ -558,6 +622,7 @@ jobs:
           zip -r crlf.zip output/crlf/
           python3 drive_upload.py crlf.zip Stage_11_CRLF
         '
+
         ### STAGE 12: SUBDOMAIN TAKEOVER
         run_stage "Stage 12: Subdomain Takeover" '
           mkdir -p output/takeover
@@ -568,6 +633,7 @@ jobs:
           zip -r takeover.zip output/takeover/
           python3 drive_upload.py takeover.zip Stage_12_Takeover
         '
+
         ### STAGE 13: NIKTO WEB SCAN
         run_stage "Stage 13: Nikto Web Scan" '
           mkdir -p output/nikto
@@ -579,6 +645,7 @@ jobs:
           zip -r nikto.zip output/nikto/
           python3 drive_upload.py nikto.zip Stage_13_Nikto
         '
+
         ### STAGE 14: COMMAND INJECTION
         run_stage "Stage 14: Command Injection" '
           mkdir -p output/cmdi
@@ -590,6 +657,7 @@ jobs:
           zip -r cmdi.zip output/cmdi/
           python3 drive_upload.py cmdi.zip Stage_14_CommandInjection
         '
+
         ### STAGE 15: CONTENT FUZZING
         run_stage "Stage 15: Content Fuzzing" '
           if [ -s output/probe/live.txt ]; then
@@ -600,6 +668,7 @@ jobs:
           zip -r fuzzing.zip output/vulns/
           python3 drive_upload.py fuzzing.zip Stage_15_Fuzzing
         '
+
         ### STAGE 16: JAELES SCANNER
         run_stage "Stage 16: Jaeles Scanner" '
           if [ -s output/crawl/all_urls.txt ]; then
@@ -608,6 +677,7 @@ jobs:
           zip -r jaeles.zip output/specialized/
           python3 drive_upload.py jaeles.zip Stage_16_Jaeles
         '
+
         ### STAGE 17: SECRETS
         run_stage "Stage 17: Secrets Detection" '
           trufflehog filesystem . --no-update > output/secrets/trufflehog.txt 2>/dev/null || true
@@ -616,6 +686,7 @@ jobs:
           zip -r secrets.zip output/secrets/
           python3 drive_upload.py secrets.zip Stage_17_Secrets
         '
+
         ### STAGE 18: GRAPHQL & API
         run_stage "Stage 18: GraphQL & API" '
           grep -iE "graphql|/api/" output/crawl/all_urls.txt > output/graphql/found_apis.txt 2>/dev/null || true
@@ -629,6 +700,7 @@ jobs:
           zip -r graphql.zip output/graphql/ output/api/
           python3 drive_upload.py graphql.zip Stage_18_GraphQL
         '
+
         ### STAGE 19: XXE & DESERIALIZATION
         run_stage "Stage 19: XXE & Deserialization" '
           mkdir -p output/xxe output/deserialization
@@ -638,6 +710,7 @@ jobs:
           zip -r xxe_deser.zip output/xxe/ output/deserialization/
           python3 drive_upload.py xxe_deser.zip Stage_19_XXE_Deserialization
         '
+
         ### STAGE 20: JWT & AUTH
         run_stage "Stage 20: JWT & Authentication" '
           mkdir -p output/auth
@@ -648,11 +721,13 @@ jobs:
           zip -r auth.zip output/auth/ output/specialized/
           python3 drive_upload.py auth.zip Stage_20_Auth
         '
+
         echo ""
         echo "=========================================="
         echo "🏁 ARES MAXIMUM POWER COMPLETED"
         echo "=========================================="
         tg "🏁 *ARES MAXIMUM POWER* completed on \`$TARGET\` - 20 stages"
+
     - name: Cleanup
       if: always()
       run: |
