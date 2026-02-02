@@ -15,41 +15,45 @@ jobs:
     - name: Clean previous data
       run: |
         rm -rf output *.zip || true
+        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized}
 
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip zip curl git wget
-        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized}
+        sudo apt-get install -y python3-pip zip curl wget git ruby-full chromium chromium-driver xvfb libpcap-dev libxml2-dev libxslt1-dev
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-    - name: Install Go tools (GitHub-safe)
+    - name: Install Go tools
       run: |
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
         go install github.com/tomnomnom/assetfinder@latest
-        # Findomain fixed (use binary)
-        curl -LO https://github.com/Edu4rdSHL/findomain/releases/latest/download/findomain-linux
-        chmod +x findomain-linux
-        sudo mv findomain-linux /usr/local/bin/findomain
         go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
         go install github.com/projectdiscovery/httpx/cmd/httpx@latest
         go install github.com/projectdiscovery/katana/cmd/katana@latest
-        go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
-        go install github.com/hahwul/dalfox/v2@latest
         go install github.com/lc/gau/v2/cmd/gau@latest
+        go install github.com/hahwul/dalfox/v2@latest
+        go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
         go install github.com/tomnomnom/waybackurls@latest
         go install github.com/hakluke/hakrawler@latest
-        go install github.com/hakluke/gospider@latest
-        go install github.com/tomnomnom/unfurl@latest
         go install github.com/tomnomnom/qsreplace@latest
+        go install github.com/tomnomnom/unfurl@latest
+        go install github.com/tomnomnom/paramspider@latest
         go install github.com/Emoe/kxss@latest
-        go install github.com/projectdiscovery/gowitness@latest
-        go install github.com/michenriksen/aquatone@latest
-        go install github.com/FortAwesome/eyewitness@latest
 
     - name: Install Python tools
       run: |
-        pip3 install trufflehog gitleaks detect-secrets paramspider arjun corsy crlfsuite openredirex lfimap ssrfmap jsluice mantra checkov tfsec prowler cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser
+        pip3 install trufflehog gitleaks paramspider arjun corsy crlfsuite openredirex lfimap ssrfmap detect-secrets jsluice mantra checkov tfsec prowler cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser
+
+    - name: Jaeles Signatures
+      run: |
+        jaeles config init
+        git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
+
+    - name: Download gospider binary
+      run: |
+        curl -LO https://github.com/hakluke/gospider/releases/latest/download/gospider-linux
+        chmod +x gospider-linux
+        sudo mv gospider-linux /usr/local/bin/gospider
 
     - name: Create Google Drive uploader
       run: |
@@ -59,40 +63,29 @@ jobs:
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
 
-        creds = Credentials(
-            None,
-            refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.environ["GOOGLE_CLIENT_ID"],
-            client_secret=os.environ["GOOGLE_CLIENT_SECRET"]
-        )
+        def upload(file_path, folder_name):
+            creds = Credentials(None,
+                refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=os.environ["GOOGLE_CLIENT_ID"],
+                client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
+            service = build("drive","v3",credentials=creds)
 
-        service = build("drive","v3",credentials=creds)
+            query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents and trashed=false"
+            res = service.files().list(q=query).execute().get("files",[])
+            if res:
+                folder_id = res[0]["id"]
+            else:
+                folder = service.files().create(
+                    body={"name":folder_name,"mimeType":"application/vnd.google-apps.folder","parents":[os.environ["GDRIVE_FOLDER_ID"]]},
+                    fields="id").execute()
+                folder_id = folder["id"]
 
-        file_path = sys.argv[1]
-        folder_name = sys.argv[2]
+            media = MediaFileUpload(file_path)
+            service.files().create(body={"name":os.path.basename(file_path),"parents":[folder_id]},media_body=media).execute()
 
-        query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents"
-        res = service.files().list(q=query).execute().get("files",[])
-
-        if res:
-            folder_id = res[0]["id"]
-        else:
-            folder = service.files().create(
-                body={
-                    "name": folder_name,
-                    "mimeType":"application/vnd.google-apps.folder",
-                    "parents":[os.environ["GDRIVE_FOLDER_ID"]]
-                },
-                fields="id"
-            ).execute()
-            folder_id = folder["id"]
-
-        media = MediaFileUpload(file_path)
-        service.files().create(
-            body={"name":os.path.basename(file_path),"parents":[folder_id]},
-            media_body=media
-        ).execute()
+        if __name__ == "__main__":
+            upload(sys.argv[1], sys.argv[2])
         EOF
 
     - name: Run ARES pipeline
@@ -109,63 +102,73 @@ jobs:
         tg() {
           curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
             -d chat_id="$TELEGRAM_CHAT_ID" \
+            -d parse_mode="Markdown" \
             -d text="$1" >/dev/null
         }
 
         tg "🚀 ARES started on $TARGET"
 
-        # STAGE 1 – RECON
+        ### STAGE 1: RECON
         tg "🔍 Recon started"
         subfinder -d $TARGET -silent > output/recon/subs.txt || true
         assetfinder --subs-only $TARGET >> output/recon/subs.txt || true
-        findomain -t $TARGET -q -u output/recon/findomain.txt || true
-        dnsx -l output/recon/subs.txt -a -aaaa -mx -cname -ptr -o output/recon/dnsx.txt || true
-        sort -u output/recon/*.txt > output/recon/final_subs.txt
+        dnsx -l output/recon/subs.txt -silent > output/recon/dnsx.txt || true
+        sort -u output/recon/subs.txt > output/recon/final_subs.txt
         zip -j recon.zip output/recon/*
         python3 drive_upload.py recon.zip Stage_1_Recon
         tg "✅ Recon finished"
 
-        # STAGE 2 – PROBING
+        ### STAGE 2: PROBING
         tg "🌐 Probing started"
         httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt || true
+        httprobe < output/recon/final_subs.txt > output/probe/httprobe.txt || true
+        whatweb -i output/recon/final_subs.txt -o output/probe/whatweb.txt || true
         zip -j probe.zip output/probe/*
         python3 drive_upload.py probe.zip Stage_2_Probe
         tg "✅ Probing finished"
 
-        # STAGE 3 – CRAWLING
+        ### STAGE 3: CRAWLING
         tg "🕷 Crawling started"
         katana -l output/probe/live.txt -silent > output/crawl/katana.txt || true
         gau $TARGET >> output/crawl/gau.txt || true
         waybackurls $TARGET >> output/crawl/wayback.txt || true
-        hakrawler -url $TARGET -plain >> output/crawl/hakrawler.txt || true
+        hakrawler -url $TARGET > output/crawl/hakrawler.txt || true
         gospider -s $TARGET -o output/crawl/gospider.txt || true
-        unfurl -u $TARGET > output/crawl/unfurl.txt || true
-        qsreplace -file output/crawl/unfurl.txt > output/crawl/qsreplace.txt || true
-        kxss -i output/crawl/qsreplace.txt -o output/crawl/kxss.txt || true
         zip -j crawl.zip output/crawl/*
         python3 drive_upload.py crawl.zip Stage_3_Crawl
         tg "✅ Crawling finished"
 
-        # STAGE 4 – VULNS
+        ### STAGE 4: PARAMS & XSS
+        tg "⚡ Parameter scan started"
+        paramspider -d $TARGET -o output/crawl/params.txt || true
+        arjun -u $TARGET -o output/crawl/arjun.txt || true
+        unfurl -u $TARGET > output/crawl/unfurl.txt || true
+        qsreplace -w output/crawl/params.txt > output/crawl/qsreplace.txt || true
+        kxss -list output/crawl/params.txt > output/crawl/kxss.txt || true
+        zip -j params.zip output/crawl/*
+        python3 drive_upload.py params.zip Stage_4_Params
+        tg "✅ Parameter scan finished"
+
+        ### STAGE 5: VULNS
         tg "💥 Vulnerability scan started"
         nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt || true
         dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt || true
         corsy -u $TARGET > output/vulns/corsy.txt || true
-        crlfsuite -i output/crawl/wayback.txt > output/vulns/crlfsuite.txt || true
-        openredirex -l output/probe/live.txt > output/vulns/openredirex.txt || true
-        lfimap -l output/probe/live.txt -o output/vulns/lfimap.txt || true
-        ssrfmap -i output/probe/live.txt -o output/vulns/ssrfmap.txt || true
+        crlfsuite scan $TARGET -o output/vulns/crlfsuite.txt || true
+        openredirex -u $TARGET > output/vulns/openredirex.txt || true
+        lfimap -u $TARGET -o output/vulns/lfimap.txt || true
+        ssrfmap -u $TARGET > output/vulns/ssrfmap.txt || true
         zip -j vulns.zip output/vulns/*
-        python3 drive_upload.py vulns.zip Stage_4_Vulns
+        python3 drive_upload.py vulns.zip Stage_5_Vulns
         tg "✅ Vulnerability scan finished"
 
-        # STAGE 5 – SECRETS & SPECIALIZED
+        ### STAGE 6: SECRETS
         tg "🔑 Secrets scan started"
         trufflehog filesystem . > output/secrets/trufflehog.txt || true
         gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true
-        detect-secrets scan . > output/secrets/detect-secrets.txt || true
-        jsluice -d . > output/secrets/jsluice.txt || true
-        mantra -d . > output/secrets/mantra.txt || true
+        detect-secrets scan > output/secrets/detect_secrets.txt || true
+        jsluice scan > output/secrets/jsluice.txt || true
+        mantra scan > output/secrets/mantra.txt || true
         zip -j secrets.zip output/secrets/*
-        python3 drive_upload.py secrets.zip Stage_5_Secrets
+        python3 drive_upload.py secrets.zip Stage_6_Secrets
         tg "🏁 ARES completed on $TARGET"
