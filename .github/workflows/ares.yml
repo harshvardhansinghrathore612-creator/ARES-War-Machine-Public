@@ -25,12 +25,21 @@ jobs:
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm dirb seclists
+        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full libpcap-dev libxml2-dev libxslt1-dev libsqlite3-dev libffi-dev npm dirb
         # Set up proper PATH for Go binaries
         echo "GOPATH=$HOME/go" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
         echo "/usr/local/go/bin" >> $GITHUB_PATH
         echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install SecLists from GitHub
+      run: |
+        echo "Installing SecLists from GitHub..."
+        git clone --depth 1 https://github.com/danielmiessler/SecLists.git $HOME/SecLists
+        # Create symlinks for common wordlists
+        sudo mkdir -p /usr/share/wordlists/
+        sudo ln -sf $HOME/SecLists/Discovery/Web-Content/common.txt /usr/share/wordlists/common.txt 2>/dev/null || true
+        sudo ln -sf $HOME/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt /usr/share/wordlists/dirb-medium.txt 2>/dev/null || true
 
     - name: Install Go tools (GitHub-safe)
       run: |
@@ -314,7 +323,7 @@ jobs:
           sort -u output/recon/subs.txt > output/recon/final_subs.txt
           dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt
           puredns resolve output/recon/final_subs.txt -r 1.1.1.1 > output/recon/puredns.txt
-          zip -j recon.zip output/recon/*
+          zip -r recon.zip output/recon/
           python3 drive_upload.py recon.zip Stage_1_Recon
         '
 
@@ -325,17 +334,19 @@ jobs:
           cat output/probe/live.txt
           # Take screenshots with gowitness (limited to 5)
           head -5 output/probe/live.txt > output/probe/live_limited.txt
+          mkdir -p output/probe/screenshots/
           gowitness file -f output/probe/live_limited.txt -o output/probe/screenshots/ --no-db
-          zip -j probe.zip output/probe/*
+          zip -r probe.zip output/probe/
           python3 drive_upload.py probe.zip Stage_2_Probe
         '
 
         ### STAGE 3: CRAWLING
         run_stage "Crawling" '
           katana -l output/probe/live.txt -silent > output/crawl/katana.txt
-          gau $TARGET >> output/crawl/gau.txt
-          waybackurls $TARGET >> output/crawl/wayback.txt
-          hakrawler -url $TARGET > output/crawl/hakrawler.txt
+          # Remove duplicate crawlers for speed - keep only katana and paramspider
+          # gau $TARGET >> output/crawl/gau.txt
+          # waybackurls $TARGET >> output/crawl/wayback.txt
+          # hakrawler -url $TARGET > output/crawl/hakrawler.txt
           gospider -s $TARGET -o output/crawl/gospider/
           find output/crawl/gospider/ -type f -name "*.txt" -exec cat {} \; > output/crawl/gospider_combined.txt 2>/dev/null || true
           # Use paramspider
@@ -347,7 +358,7 @@ jobs:
           # Extract parameterized URLs for later stages
           grep "=" output/crawl/katana.txt > output/crawl/params_only.txt
           echo "Parameterized URLs found: $(wc -l < output/crawl/params_only.txt)"
-          zip -j crawl.zip output/crawl/*
+          zip -r crawl.zip output/crawl/
           python3 drive_upload.py crawl.zip Stage_3_Crawl
         '
 
@@ -358,9 +369,9 @@ jobs:
           cat output/crawl/katana.txt | unfurl paths keys values > output/crawl/unfurl.txt
           # Use x8 for parameter discovery (only on 3 URLs)
           head -3 output/probe/live.txt | while read url; do
-            x8 -u $url -w /usr/share/wordlists/dirb/common.txt > output/crawl/x8_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt
+            x8 -u $url -w /usr/share/wordlists/common.txt > output/crawl/x8_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt
           done
-          zip -j params.zip output/crawl/*
+          zip -r params.zip output/crawl/
           python3 drive_upload.py params.zip Stage_4_Params
         '
 
@@ -370,18 +381,18 @@ jobs:
           dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt
           # Use ffuf for fuzzing with rate limiting
           head -3 output/probe/live.txt | while read url; do
-            ffuf -u $url/FUZZ -w /usr/share/wordlists/dirb/common.txt -o output/vulns/ffuf_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").json -rate 10 -t 3
+            ffuf -u $url/FUZZ -w /usr/share/wordlists/common.txt -o output/vulns/ffuf_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").json -rate 10 -t 3
           done
-          zip -j vulns.zip output/vulns/*
+          zip -r vulns.zip output/vulns/
           python3 drive_upload.py vulns.zip Stage_5_Vulns
         '
 
         ### STAGE 6: SECRETS
         run_stage "Secrets Detection" '
-          trufflehog filesystem . --no-update > output/secrets/trufflehog.txt
+          trufflehog filesystem . --directory . --no-update > output/secrets/trufflehog.txt
           gitleaks detect --no-git -v > output/secrets/gitleaks.txt
           git-secrets --scan > output/secrets/git_secrets.txt 2>&1 || true
-          zip -j secrets.zip output/secrets/*
+          zip -r secrets.zip output/secrets/
           python3 drive_upload.py secrets.zip Stage_6_Secrets
         '
 
@@ -401,7 +412,7 @@ jobs:
           echo "https://$TARGET/swagger.json" > output/api/swagger_endpoints.txt
           echo "https://$TARGET/api-docs" >> output/api/swagger_endpoints.txt
           
-          zip -j graphql_api.zip output/graphql/* output/api/*
+          zip -r graphql_api.zip output/graphql/ output/api/
           python3 drive_upload.py graphql_api.zip Stage_7_GraphQL_API
         '
 
@@ -416,17 +427,17 @@ jobs:
           echo "Cloudsplaining skipped (requires AWS credentials)" > output/cloud/cloudsplaining.txt
           
           rm -f test.tf
-          zip -j cloud.zip output/cloud/*
+          zip -r cloud.zip output/cloud/
           python3 drive_upload.py cloud.zip Stage_8_Cloud_Security
         '
 
         ### STAGE 9: JWT TESTING
         run_stage "JWT Testing" '
-          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
+          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE6MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
           
           jwt_tool output/specialized/sample_jwt.txt > output/specialized/jwt_tool.txt 2>&1 || true
           
-          zip -j specialized.zip output/specialized/*
+          zip -r specialized.zip output/specialized/
           python3 drive_upload.py specialized.zip Stage_9_Specialized_Tools
         '
 
@@ -443,25 +454,25 @@ jobs:
             echo "No URLs to scan with Jaeles" > output/specialized/jaeles.txt
           fi
           
-          zip -j jaeles.zip output/specialized/*
+          zip -r jaeles.zip output/specialized/
           python3 drive_upload.py jaeles.zip Stage_10_Jaeles
         '
 
-        ### STAGE 11: SQL INJECTION TESTING (FIXED - ONLY PARAMETERIZED URLS)
+        ### STAGE 11: SQL INJECTION TESTING (GitHub-ToS Hardened)
         run_stage "SQL Injection Testing" '
           echo "Testing for SQL injection on parameterized URLs..."
           if [ -s output/crawl/params_only.txt ]; then
-            head -10 output/crawl/params_only.txt > output/sql/params_for_sql.txt
-            echo "Testing with sqlmap (advanced flags)..."
-            sqlmap -m output/sql/params_for_sql.txt --batch --risk 3 --level 5 --technique=BEUSTQ --tamper=space2comment --delay=2 --threads=3 > output/sql/sqlmap_results.txt 2>&1 || true
-            echo "Testing with ghauri..."
-            head -5 output/crawl/params_only.txt | while read url; do
-              ghauri -u $url --batch --delay 2 > output/sql/ghauri_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+            head -5 output/crawl/params_only.txt > output/sql/params_for_sql.txt
+            echo "Testing with sqlmap (GitHub-ToS safe flags)..."
+            sqlmap -m output/sql/params_for_sql.txt --batch --risk 1 --level 1 --technique=BEU --delay=5 --threads=2 --timeout=30 > output/sql/sqlmap_results.txt 2>&1 || true
+            echo "Testing with ghauri (GitHub-ToS safe)..."
+            head -3 output/crawl/params_only.txt | while read url; do
+              ghauri -u $url --batch --delay 5 --timeout 30 > output/sql/ghauri_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
             done
           else
             echo "No parameterized URLs found for SQL injection testing" > output/sql/sqlmap_results.txt
           fi
-          zip -j sql.zip output/sql/*
+          zip -r sql.zip output/sql/
           python3 drive_upload.py sql.zip Stage_11_SQL_Injection
         '
 
@@ -470,7 +481,7 @@ jobs:
           echo "NoSQL injection testing skipped (python2 deprecated on GitHub Actions)" > output/nosql/no_urls.txt
           echo "NoSQLMap requires python2 which is not available on ubuntu-latest" >> output/nosql/no_urls.txt
           echo "Consider using manual testing with modern NoSQL injection tools" >> output/nosql/no_urls.txt
-          zip -j nosql.zip output/nosql/*
+          zip -r nosql.zip output/nosql/
           python3 drive_upload.py nosql.zip Stage_12_NoSQL
         '
 
@@ -478,15 +489,15 @@ jobs:
         run_stage "Command Injection & Template Testing" '
           echo "Testing for command injection..."
           if [ -s output/crawl/params_only.txt ]; then
-            head -5 output/crawl/params_only.txt | while read url; do
+            head -3 output/crawl/params_only.txt | while read url; do
               echo "Testing $url with commix..."
-              commix -u $url --batch --delay 2 > output/templates/commix_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+              commix -u $url --batch --delay 5 > output/templates/commix_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
               echo "tplmap skipped (python2 deprecated on GitHub Actions)" > output/templates/tplmap_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt
             done
           else
             echo "No parameterized URLs found for command injection testing" > output/templates/no_urls.txt
           fi
-          zip -j templates.zip output/templates/*
+          zip -r templates.zip output/templates/
           python3 drive_upload.py templates.zip Stage_13_Templates
         '
 
@@ -501,7 +512,7 @@ jobs:
           # Simple check for XML endpoints
           grep -i "\.xml\|application/xml\|text/xml" output/crawl/katana.txt > output/xxe/xml_endpoints.txt 2>/dev/null || true
           echo "Potential XML endpoints found: $(wc -l < output/xxe/xml_endpoints.txt)"
-          zip -j xxe.zip output/xxe/*
+          zip -r xxe.zip output/xxe/
           python3 drive_upload.py xxe.zip Stage_14_XXE
         '
 
@@ -515,7 +526,7 @@ jobs:
           echo "Starting interactsh client..."
           timeout 30 interactsh-client -v > output/auth/interactsh.txt 2>&1 || true
           echo "AuthMatrix is a Burp extension - use manually" > output/auth/authmatrix_note.txt
-          zip -j auth.zip output/auth/*
+          zip -r auth.zip output/auth/
           python3 drive_upload.py auth.zip Stage_15_Authentication
         '
 
@@ -527,7 +538,7 @@ jobs:
           # Look for serialization endpoints
           grep -i "serialize\|unserialize\|pickle\|yaml\|json" output/crawl/katana.txt > output/specialized/serialization_endpoints.txt 2>/dev/null || true
           echo "Deserialization testing completed" > output/specialized/deserialization_summary.txt
-          zip -j deserialization.zip output/specialized/*
+          zip -r deserialization.zip output/specialized/
           python3 drive_upload.py deserialization.zip Stage_16_Deserialization
         '
 
