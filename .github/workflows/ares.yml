@@ -26,6 +26,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full chromium chromium-driver xvfb libpcap-dev libxml2-dev libxslt1-dev
+        # Set up proper PATH for Go binaries
+        echo "GOPATH=$HOME/go" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
         echo "/usr/local/go/bin" >> $GITHUB_PATH
 
@@ -33,6 +35,9 @@ jobs:
       run: |
         # Install Go tools with proper module support
         export GO111MODULE=on
+        export GOPATH=$HOME/go
+        export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
+        
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
         go install github.com/tomnomnom/assetfinder@latest
         go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
@@ -54,7 +59,18 @@ jobs:
     - name: Install Python tools
       run: |
         pip3 install --upgrade pip --user
-        pip3 install truffleHog arjun checkov cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser --user
+        pip3 install truffleHog arjun checkov cloudsplaining s3scanner inql jwt_tool swagger-parser --user
+
+    - name: Install GraphQLMap (from GitHub)
+      run: |
+        git clone --depth 1 https://github.com/swisskyrepo/GraphQLmap.git /tmp/GraphQLmap
+        cd /tmp/GraphQLmap
+        pip3 install -r requirements.txt --user
+        # Create a wrapper script
+        echo '#!/bin/bash
+        cd /tmp/GraphQLmap
+        python3 graphqlmap.py "$@"' | sudo tee /usr/local/bin/graphqlmap
+        sudo chmod +x /usr/local/bin/graphqlmap
 
     - name: Install Prowler (AWS Security Tool)
       run: |
@@ -62,6 +78,10 @@ jobs:
 
     - name: Install Jaeles
       run: |
+        export GO111MODULE=on
+        export GOPATH=$HOME/go
+        export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin
+        
         go install github.com/jaeles-project/jaeles@latest
         sudo cp $HOME/go/bin/jaeles /usr/local/bin/
         jaeles config init
@@ -141,57 +161,76 @@ jobs:
             -d text="$1" >/dev/null
         }
 
-        tg "🚀 ARES started on $TARGET"
+        # Send start notification
+        tg "🚀 *ARES Pipeline Started* on $TARGET"
+
+        # Function to handle errors and send notifications
+        run_stage() {
+          local stage_name=$1
+          local stage_command=$2
+          
+          echo "Starting $stage_name..."
+          if eval "$stage_command"; then
+            tg "✅ $stage_name completed successfully"
+            return 0
+          else
+            tg "❌ *$stage_name FAILED* - Pipeline stopped"
+            exit 1
+          fi
+        }
 
         ### STAGE 1: RECON
-        tg "🔍 Recon started"
-        subfinder -d $TARGET -silent > output/recon/subs.txt 2>/dev/null || true
-        assetfinder --subs-only $TARGET >> output/recon/subs.txt 2>/dev/null || true
-        sort -u output/recon/subs.txt > output/recon/final_subs.txt
-        dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt 2>/dev/null || true
-        zip -j recon.zip output/recon/*
-        python3 drive_upload.py recon.zip Stage_1_Recon
-        tg "✅ Recon finished"
+        run_stage "Reconnaissance" '
+          subfinder -d $TARGET -silent > output/recon/subs.txt 2>/dev/null || true
+          assetfinder --subs-only $TARGET >> output/recon/subs.txt 2>/dev/null || true
+          sort -u output/recon/subs.txt > output/recon/final_subs.txt
+          dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt 2>/dev/null || true
+          zip -j recon.zip output/recon/*
+          python3 drive_upload.py recon.zip Stage_1_Recon
+        '
 
         ### STAGE 2: PROBING
-        tg "🌐 Probing started"
-        httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt 2>/dev/null || true
-        zip -j probe.zip output/probe/*
-        python3 drive_upload.py probe.zip Stage_2_Probe
-        tg "✅ Probing finished"
+        run_stage "Probing" '
+          httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt 2>/dev/null || true
+          zip -j probe.zip output/probe/*
+          python3 drive_upload.py probe.zip Stage_2_Probe
+        '
 
         ### STAGE 3: CRAWLING
-        tg "🕷 Crawling started"
-        katana -l output/probe/live.txt -silent > output/crawl/katana.txt 2>/dev/null || true
-        gau $TARGET >> output/crawl/gau.txt 2>/dev/null || true
-        waybackurls $TARGET >> output/crawl/wayback.txt 2>/dev/null || true
-        hakrawler -url $TARGET > output/crawl/hakrawler.txt 2>/dev/null || true
-        gospider -s $TARGET -o output/crawl/gospider.txt 2>/dev/null || true
-        zip -j crawl.zip output/crawl/*
-        python3 drive_upload.py crawl.zip Stage_3_Crawl
-        tg "✅ Crawling finished"
+        run_stage "Crawling" '
+          katana -l output/probe/live.txt -silent > output/crawl/katana.txt 2>/dev/null || true
+          gau $TARGET >> output/crawl/gau.txt 2>/dev/null || true
+          waybackurls $TARGET >> output/crawl/wayback.txt 2>/dev/null || true
+          hakrawler -url $TARGET > output/crawl/hakrawler.txt 2>/dev/null || true
+          gospider -s $TARGET -o output/crawl/gospider.txt 2>/dev/null || true
+          zip -j crawl.zip output/crawl/*
+          python3 drive_upload.py crawl.zip Stage_3_Crawl
+        '
 
         ### STAGE 4: PARAMS & XSS
-        tg "⚡ Parameter scan started"
-        qsreplace -w output/crawl/katana.txt > output/crawl/qsreplace.txt 2>/dev/null || true
-        kxss -list output/crawl/katana.txt > output/crawl/kxss.txt 2>/dev/null || true
-        unfurl -u $TARGET > output/crawl/unfurl.txt 2>/dev/null || true
-        zip -j params.zip output/crawl/*
-        python3 drive_upload.py params.zip Stage_4_Params
-        tg "✅ Parameter scan finished"
+        run_stage "Parameter & XSS Scan" '
+          qsreplace -w output/crawl/katana.txt > output/crawl/qsreplace.txt 2>/dev/null || true
+          kxss -list output/crawl/katana.txt > output/crawl/kxss.txt 2>/dev/null || true
+          unfurl -u $TARGET > output/crawl/unfurl.txt 2>/dev/null || true
+          zip -j params.zip output/crawl/*
+          python3 drive_upload.py params.zip Stage_4_Params
+        '
 
         ### STAGE 5: VULNS
-        tg "💥 Vulnerability scan started"
-        nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt 2>/dev/null || true
-        dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt 2>/dev/null || true
-        zip -j vulns.zip output/vulns/*
-        python3 drive_upload.py vulns.zip Stage_5_Vulns
-        tg "✅ Vulnerability scan finished"
+        run_stage "Vulnerability Scanning" '
+          nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt 2>/dev/null || true
+          dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt 2>/dev/null || true
+          zip -j vulns.zip output/vulns/*
+          python3 drive_upload.py vulns.zip Stage_5_Vulns
+        '
 
         ### STAGE 6: SECRETS
-        tg "🔑 Secrets scan started"
-        trufflehog filesystem . > output/secrets/trufflehog.txt 2>/dev/null || true
-        gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null || true
-        zip -j secrets.zip output/secrets/*
-        python3 drive_upload.py secrets.zip Stage_6_Secrets
-        tg "🏁 ARES completed on $TARGET"
+        run_stage "Secrets Detection" '
+          trufflehog filesystem . > output/secrets/trufflehog.txt 2>/dev/null || true
+          gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null || true
+          zip -j secrets.zip output/secrets/*
+          python3 drive_upload.py secrets.zip Stage_6_Secrets
+        '
+
+        # Final success notification
+        tg "🏁 *ARES Pipeline COMPLETED SUCCESSFULLY* on $TARGET"
