@@ -46,13 +46,19 @@ jobs:
         go install github.com/tomnomnom/qsreplace@latest
         go install github.com/tomnomnom/unfurl@latest
         go install github.com/Emoe/kxss@latest
+        # Install tfsec (Go tool)
+        go install github.com/aquasecurity/tfsec/cmd/tfsec@latest
         # Copy binaries to /usr/local/bin for global access
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
 
     - name: Install Python tools
       run: |
-        pip3 install --upgrade pip
-        pip3 install truffleHog arjun checkov tfsec prowler cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser
+        pip3 install --upgrade pip --user
+        pip3 install truffleHog arjun checkov cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser --user
+
+    - name: Install Prowler (AWS Security Tool)
+      run: |
+        pip3 install prowler --user
 
     - name: Install Jaeles
       run: |
@@ -68,14 +74,14 @@ jobs:
         chmod +x gospider-linux
         sudo mv gospider-linux /usr/local/bin/gospider
         # gitleaks (precompiled Go binary)
-        curl -L -o gitleaks-linux-amd64 "https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz"
-        tar -xzf gitleaks-linux-amd64 2>/dev/null || true
+        curl -L -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz"
+        tar -xzf gitleaks.tar.gz
         if [ -f "gitleaks" ]; then
           chmod +x gitleaks
           sudo mv gitleaks /usr/local/bin/gitleaks
         fi
         # Clean up
-        rm -f gitleaks-linux-amd64 gitleaks_linux_x64.tar.gz
+        rm -f gitleaks.tar.gz
 
     - name: Create Google Drive uploader
       run: |
@@ -110,7 +116,7 @@ jobs:
             upload(sys.argv[1], sys.argv[2])
         EOF
         # Install required Python packages for Google Drive API
-        pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+        pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib --user
 
     - name: Run ARES pipeline
       env:
