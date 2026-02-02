@@ -63,11 +63,22 @@ jobs:
         
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
 
-    - name: Install Python tools
+    - name: Install Python tools (FIXED - NO git-secrets)
       run: |
         echo "Installing Python tools..."
         pip3 install --upgrade pip --user
-        pip3 install arjun checkov s3scanner swagger-parser x8 git-secrets ghauri nosqlmap commix tplmap phpggc --user
+        # Install only available PyPI packages
+        pip3 install arjun checkov s3scanner swagger-parser x8 ghauri nosqlmap commix tplmap phpggc --user
+
+    - name: Install git-secrets (AWS tool)
+      run: |
+        echo "Installing git-secrets from AWS..."
+        git clone --depth 1 https://github.com/awslabs/git-secrets.git $HOME/tools/git-secrets
+        cd $HOME/tools/git-secrets
+        sudo make install
+        echo '#!/bin/bash
+        git-secrets "$@"' | sudo tee /usr/local/bin/git-secrets
+        sudo chmod +x /usr/local/bin/git-secrets
 
     - name: Install paramspider (from GitHub)
       run: |
