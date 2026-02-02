@@ -1,0 +1,142 @@
+name: ARES – GitHub Safe Vulnerability Pipeline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  security-hunt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Clean previous data
+      run: |
+        rm -rf output *.zip || true
+
+    - name: Install core dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pip zip curl git
+        mkdir -p output/{recon,probe,crawl,vulns,secrets}
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+    - name: Install Go tools (GitHub-safe)
+      run: |
+        go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+        go install github.com/tomnomnom/assetfinder@latest
+        go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+        go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+        go install github.com/projectdiscovery/katana/cmd/katana@latest
+        go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+        go install github.com/hahwul/dalfox/v2@latest
+        go install github.com/lc/gau/v2/cmd/gau@latest
+
+    - name: Install Python tools
+      run: |
+        pip3 install trufflehog gitleaks paramspider arjun corsy crlfsuite
+
+    - name: Create Google Drive uploader
+      run: |
+        cat << 'EOF' > drive_upload.py
+        import os,sys
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
+
+        creds = Credentials(
+            None,
+            refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=os.environ["GOOGLE_CLIENT_ID"],
+            client_secret=os.environ["GOOGLE_CLIENT_SECRET"]
+        )
+
+        service = build("drive","v3",credentials=creds)
+
+        file_path = sys.argv[1]
+        folder_name = sys.argv[2]
+
+        query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents"
+        res = service.files().list(q=query).execute().get("files",[])
+
+        if res:
+            folder_id = res[0]["id"]
+        else:
+            folder = service.files().create(
+                body={
+                    "name": folder_name,
+                    "mimeType":"application/vnd.google-apps.folder",
+                    "parents":[os.environ["GDRIVE_FOLDER_ID"]]
+                },
+                fields="id"
+            ).execute()
+            folder_id = folder["id"]
+
+        media = MediaFileUpload(file_path)
+        service.files().create(
+            body={"name":os.path.basename(file_path),"parents":[folder_id]},
+            media_body=media
+        ).execute()
+        EOF
+
+    - name: Run ARES pipeline
+      env:
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        TARGET=$(head -n 1 targets.txt)
+
+        tg() {
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+            -d chat_id="$TELEGRAM_CHAT_ID" \
+            -d text="$1" >/dev/null
+        }
+
+        tg "🚀 ARES started on $TARGET"
+
+        # STAGE 1 – RECON
+        tg "🔍 Recon started"
+        subfinder -d $TARGET -silent > output/recon/subs.txt || true
+        assetfinder --subs-only $TARGET >> output/recon/subs.txt || true
+        sort -u output/recon/subs.txt > output/recon/final_subs.txt
+        zip -j recon.zip output/recon/*
+        python3 drive_upload.py recon.zip Stage_1_Recon
+        tg "✅ Recon finished"
+
+        # STAGE 2 – PROBING
+        tg "🌐 Probing started"
+        httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt || true
+        zip -j probe.zip output/probe/*
+        python3 drive_upload.py probe.zip Stage_2_Probe
+        tg "✅ Probing finished"
+
+        # STAGE 3 – CRAWLING
+        tg "🕷 Crawling started"
+        katana -l output/probe/live.txt -silent > output/crawl/katana.txt || true
+        gau $TARGET >> output/crawl/gau.txt || true
+        zip -j crawl.zip output/crawl/*
+        python3 drive_upload.py crawl.zip Stage_3_Crawl
+        tg "✅ Crawling finished"
+
+        # STAGE 4 – VULNS
+        tg "💥 Vulnerability scan started"
+        nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt || true
+        dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt || true
+        zip -j vulns.zip output/vulns/*
+        python3 drive_upload.py vulns.zip Stage_4_Vulns
+        tg "✅ Vulnerability scan finished"
+
+        # STAGE 5 – SECRETS
+        tg "🔑 Secrets scan started"
+        trufflehog filesystem . > output/secrets/trufflehog.txt || true
+        gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true
+        zip -j secrets.zip output/secrets/*
+        python3 drive_upload.py secrets.zip Stage_5_Secrets
+        tg "🏁 ARES completed on $TARGET"
