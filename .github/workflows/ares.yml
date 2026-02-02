@@ -15,7 +15,7 @@ jobs:
     - name: Clean previous data
       run: |
         rm -rf output *.zip || true
-        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud,sql,nosql,xxe,auth,templates}
+        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud,sql,nosql,xxe,auth,templates,deserialization}
 
     - name: Install Go
       uses: actions/setup-go@v4
@@ -343,10 +343,6 @@ jobs:
         ### STAGE 3: CRAWLING
         run_stage "Crawling" '
           katana -l output/probe/live.txt -silent > output/crawl/katana.txt
-          # Remove duplicate crawlers for speed - keep only katana and paramspider
-          # gau $TARGET >> output/crawl/gau.txt
-          # waybackurls $TARGET >> output/crawl/wayback.txt
-          # hakrawler -url $TARGET > output/crawl/hakrawler.txt
           gospider -s $TARGET -o output/crawl/gospider/
           find output/crawl/gospider/ -type f -name "*.txt" -exec cat {} \; > output/crawl/gospider_combined.txt 2>/dev/null || true
           # Use paramspider
@@ -433,7 +429,7 @@ jobs:
 
         ### STAGE 9: JWT TESTING
         run_stage "JWT Testing" '
-          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE6MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
+          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
           
           jwt_tool output/specialized/sample_jwt.txt > output/specialized/jwt_tool.txt 2>&1 || true
           
@@ -462,6 +458,7 @@ jobs:
         run_stage "SQL Injection Testing" '
           echo "Testing for SQL injection on parameterized URLs..."
           if [ -s output/crawl/params_only.txt ]; then
+            mkdir -p output/sql
             head -5 output/crawl/params_only.txt > output/sql/params_for_sql.txt
             echo "Testing with sqlmap (GitHub-ToS safe flags)..."
             sqlmap -m output/sql/params_for_sql.txt --batch --risk 1 --level 1 --technique=BEU --delay=5 --threads=2 --timeout=30 > output/sql/sqlmap_results.txt 2>&1 || true
@@ -485,13 +482,13 @@ jobs:
           python3 drive_upload.py nosql.zip Stage_12_NoSQL
         '
 
-        ### STAGE 13: COMMAND INJECTION & TEMPLATE TESTING (FIXED - DISABLED PYTHON2 TOOLS)
+        ### STAGE 13: COMMAND INJECTION & TEMPLATE TESTING (FIXED - GitHub-ToS Hardened)
         run_stage "Command Injection & Template Testing" '
           echo "Testing for command injection..."
           if [ -s output/crawl/params_only.txt ]; then
             head -3 output/crawl/params_only.txt | while read url; do
-              echo "Testing $url with commix..."
-              commix -u $url --batch --delay 5 > output/templates/commix_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
+              echo "Testing $url with commix (GitHub-ToS safe)..."
+              commix -u $url --batch --delay 5 --technique=classic > output/templates/commix_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt 2>&1 || true
               echo "tplmap skipped (python2 deprecated on GitHub Actions)" > output/templates/tplmap_$(echo $url | sed "s/[^a-zA-Z0-9]/_/g").txt
             done
           else
@@ -530,15 +527,15 @@ jobs:
           python3 drive_upload.py auth.zip Stage_15_Authentication
         '
 
-        ### STAGE 16: DESERIALIZATION TESTING
+        ### STAGE 16: DESERIALIZATION TESTING (FIXED - SEPARATE DIRECTORY)
         run_stage "Deserialization Testing" '
           echo "Testing for deserialization vulnerabilities..."
           echo "Creating PHP deserialization payloads with phpggc..."
-          phpggc --list > output/specialized/phpggc_list.txt 2>&1 || true
+          phpggc --list > output/deserialization/phpggc_list.txt 2>&1 || true
           # Look for serialization endpoints
-          grep -i "serialize\|unserialize\|pickle\|yaml\|json" output/crawl/katana.txt > output/specialized/serialization_endpoints.txt 2>/dev/null || true
-          echo "Deserialization testing completed" > output/specialized/deserialization_summary.txt
-          zip -r deserialization.zip output/specialized/
+          grep -i "serialize\|unserialize\|pickle\|yaml\|json" output/crawl/katana.txt > output/deserialization/serialization_endpoints.txt 2>/dev/null || true
+          echo "Deserialization testing completed" > output/deserialization/deserialization_summary.txt
+          zip -r deserialization.zip output/deserialization/
           python3 drive_upload.py deserialization.zip Stage_16_Deserialization
         '
 
