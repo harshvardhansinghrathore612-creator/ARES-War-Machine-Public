@@ -16,28 +16,40 @@ jobs:
       run: |
         rm -rf output *.zip || true
 
-    - name: Install core dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip zip curl git
-        mkdir -p output/{recon,probe,crawl,vulns,secrets}
+        sudo apt-get install -y python3-pip zip curl git jq dnsutils
+        mkdir -p output/{recon,probe,crawl,params,vulns,secrets,cloud,visual}
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-    - name: Install Go tools (GitHub-safe)
+    # ---------------- GO TOOLS ----------------
+    - name: Install Go tools
       run: |
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
         go install github.com/tomnomnom/assetfinder@latest
         go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
         go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+        go install github.com/tomnomnom/httprobe@latest
         go install github.com/projectdiscovery/katana/cmd/katana@latest
+        go install github.com/lc/gau/v2/cmd/gau@latest
+        go install github.com/tomnomnom/waybackurls@latest
+        go install github.com/hakluke/hakrawler@latest
         go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
         go install github.com/hahwul/dalfox/v2@latest
-        go install github.com/lc/gau/v2/cmd/gau@latest
+        go install github.com/projectdiscovery/trufflehog/v3@latest
+        go install github.com/gitleaks/gitleaks/v8@latest
+        go install github.com/tomnomnom/unfurl@latest
+        go install github.com/tomnomnom/qsreplace@latest
+        go install github.com/Emoe/kxss@latest
+        go install github.com/sensepost/gowitness@latest
 
+    # ---------------- PYTHON TOOLS ----------------
     - name: Install Python tools
       run: |
-        pip3 install trufflehog gitleaks paramspider arjun corsy crlfsuite
+        pip3 install paramspider arjun detect-secrets secretfinder corsy crlfsuite openredirex lfimap ssrfmap checkov tfsec
 
+    # ---------------- GOOGLE DRIVE UPLOADER ----------------
     - name: Create Google Drive uploader
       run: |
         cat << 'EOF' > drive_upload.py
@@ -55,33 +67,21 @@ jobs:
         )
 
         service = build("drive","v3",credentials=creds)
+        file_path=sys.argv[1]
+        folder=sys.argv[2]
 
-        file_path = sys.argv[1]
-        folder_name = sys.argv[2]
+        res=service.files().list(q=f"name='{folder}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents").execute().get("files",[])
+        fid=res[0]["id"] if res else service.files().create(
+            body={"name":folder,"mimeType":"application/vnd.google-apps.folder","parents":[os.environ["GDRIVE_FOLDER_ID"]]},
+            fields="id").execute()["id"]
 
-        query = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents"
-        res = service.files().list(q=query).execute().get("files",[])
-
-        if res:
-            folder_id = res[0]["id"]
-        else:
-            folder = service.files().create(
-                body={
-                    "name": folder_name,
-                    "mimeType":"application/vnd.google-apps.folder",
-                    "parents":[os.environ["GDRIVE_FOLDER_ID"]]
-                },
-                fields="id"
-            ).execute()
-            folder_id = folder["id"]
-
-        media = MediaFileUpload(file_path)
         service.files().create(
-            body={"name":os.path.basename(file_path),"parents":[folder_id]},
-            media_body=media
+            body={"name":os.path.basename(file_path),"parents":[fid]},
+            media_body=MediaFileUpload(file_path)
         ).execute()
         EOF
 
+    # ---------------- PIPELINE ----------------
     - name: Run ARES pipeline
       env:
         GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -93,50 +93,60 @@ jobs:
       run: |
         TARGET=$(head -n 1 targets.txt)
 
-        tg() {
-          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
-            -d chat_id="$TELEGRAM_CHAT_ID" \
-            -d text="$1" >/dev/null
-        }
+        tg(){ curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d text="$1" >/dev/null; }
 
-        tg "🚀 ARES started on $TARGET"
+        tg "🚀 ARES STARTED on $TARGET"
 
-        # STAGE 1 – RECON
+        # -------- RECON --------
         tg "🔍 Recon started"
         subfinder -d $TARGET -silent > output/recon/subs.txt || true
         assetfinder --subs-only $TARGET >> output/recon/subs.txt || true
-        sort -u output/recon/subs.txt > output/recon/final_subs.txt
+        sort -u output/recon/subs.txt > output/recon/final.txt
         zip -j recon.zip output/recon/*
         python3 drive_upload.py recon.zip Stage_1_Recon
         tg "✅ Recon finished"
 
-        # STAGE 2 – PROBING
+        # -------- PROBING --------
         tg "🌐 Probing started"
-        httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt || true
+        httpx -l output/recon/final.txt -silent > output/probe/live.txt || true
+        httprobe < output/recon/final.txt >> output/probe/live.txt || true
+        sort -u output/probe/live.txt -o output/probe/live.txt
         zip -j probe.zip output/probe/*
         python3 drive_upload.py probe.zip Stage_2_Probe
         tg "✅ Probing finished"
 
-        # STAGE 3 – CRAWLING
+        # -------- CRAWLING --------
         tg "🕷 Crawling started"
         katana -l output/probe/live.txt -silent > output/crawl/katana.txt || true
-        gau $TARGET >> output/crawl/gau.txt || true
+        gau $TARGET > output/crawl/gau.txt || true
+        waybackurls $TARGET > output/crawl/wayback.txt || true
+        hakrawler -url https://$TARGET -plain > output/crawl/hakrawler.txt || true
         zip -j crawl.zip output/crawl/*
         python3 drive_upload.py crawl.zip Stage_3_Crawl
         tg "✅ Crawling finished"
 
-        # STAGE 4 – VULNS
+        # -------- PARAMS --------
+        tg "🧪 Parameter discovery started"
+        paramspider -d $TARGET --quiet -o output/params/paramspider.txt || true
+        arjun -i output/probe/live.txt -o output/params/arjun.txt || true
+        zip -j params.zip output/params/*
+        python3 drive_upload.py params.zip Stage_4_Params
+        tg "✅ Parameter discovery finished"
+
+        # -------- VULNERABILITIES --------
         tg "💥 Vulnerability scan started"
         nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt || true
         dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt || true
+        corsy -i output/probe/live.txt > output/vulns/cors.txt || true
         zip -j vulns.zip output/vulns/*
-        python3 drive_upload.py vulns.zip Stage_4_Vulns
+        python3 drive_upload.py vulns.zip Stage_5_Vulns
         tg "✅ Vulnerability scan finished"
 
-        # STAGE 5 – SECRETS
+        # -------- SECRETS --------
         tg "🔑 Secrets scan started"
         trufflehog filesystem . > output/secrets/trufflehog.txt || true
         gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true
+        detect-secrets scan > output/secrets/detect-secrets.json || true
         zip -j secrets.zip output/secrets/*
-        python3 drive_upload.py secrets.zip Stage_5_Secrets
-        tg "🏁 ARES completed on $TARGET"
+        python3 drive_upload.py secrets.zip Stage_6_Secrets
+        tg "🏁 ARES COMPLETED on $TARGET"
