@@ -17,14 +17,22 @@ jobs:
         rm -rf output *.zip || true
         mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized}
 
+    - name: Install Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
     - name: Install core dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-pip zip curl wget git ruby-full chromium chromium-driver xvfb libpcap-dev libxml2-dev libxslt1-dev
-        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+        sudo apt-get install -y python3-pip python3-venv zip curl wget git ruby-full chromium chromium-driver xvfb libpcap-dev libxml2-dev libxslt1-dev
+        echo "$HOME/go/bin" >> $GITHUB_PATH
+        echo "/usr/local/go/bin" >> $GITHUB_PATH
 
     - name: Install Go tools (GitHub-safe)
       run: |
+        # Install Go tools with proper module support
+        export GO111MODULE=on
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
         go install github.com/tomnomnom/assetfinder@latest
         go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
@@ -38,27 +46,36 @@ jobs:
         go install github.com/tomnomnom/qsreplace@latest
         go install github.com/tomnomnom/unfurl@latest
         go install github.com/Emoe/kxss@latest
+        # Copy binaries to /usr/local/bin for global access
+        sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
 
     - name: Install Python tools
       run: |
         pip3 install --upgrade pip
-        pip3 install trufflehog arjun checkov tfsec prowler cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser
+        pip3 install truffleHog arjun checkov tfsec prowler cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser
 
-    - name: Jaeles Signatures
+    - name: Install Jaeles
       run: |
+        go install github.com/jaeles-project/jaeles@latest
+        sudo cp $HOME/go/bin/jaeles /usr/local/bin/
         jaeles config init
         git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
 
     - name: Download precompiled binaries
       run: |
         # gospider
-        curl -LO https://github.com/hakluke/gospider/releases/latest/download/gospider-linux
+        curl -L -o gospider-linux "https://github.com/hakluke/gospider/releases/latest/download/gospider-linux"
         chmod +x gospider-linux
         sudo mv gospider-linux /usr/local/bin/gospider
         # gitleaks (precompiled Go binary)
-        curl -LO https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks-linux-amd64
-        chmod +x gitleaks-linux-amd64
-        sudo mv gitleaks-linux-amd64 /usr/local/bin/gitleaks
+        curl -L -o gitleaks-linux-amd64 "https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz"
+        tar -xzf gitleaks-linux-amd64 2>/dev/null || true
+        if [ -f "gitleaks" ]; then
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+        fi
+        # Clean up
+        rm -f gitleaks-linux-amd64 gitleaks_linux_x64.tar.gz
 
     - name: Create Google Drive uploader
       run: |
@@ -92,6 +109,8 @@ jobs:
         if __name__ == "__main__":
             upload(sys.argv[1], sys.argv[2])
         EOF
+        # Install required Python packages for Google Drive API
+        pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
     - name: Run ARES pipeline
       env:
@@ -102,6 +121,11 @@ jobs:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
+        # Create targets.txt if it doesn't exist
+        if [ ! -f targets.txt ]; then
+          echo "example.com" > targets.txt
+        fi
+        
         TARGET=$(head -n 1 targets.txt)
 
         tg() {
@@ -115,53 +139,53 @@ jobs:
 
         ### STAGE 1: RECON
         tg "🔍 Recon started"
-        subfinder -d $TARGET -silent > output/recon/subs.txt || true
-        assetfinder --subs-only $TARGET >> output/recon/subs.txt || true
-        dnsx -l output/recon/subs.txt -silent > output/recon/dnsx.txt || true
+        subfinder -d $TARGET -silent > output/recon/subs.txt 2>/dev/null || true
+        assetfinder --subs-only $TARGET >> output/recon/subs.txt 2>/dev/null || true
         sort -u output/recon/subs.txt > output/recon/final_subs.txt
+        dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt 2>/dev/null || true
         zip -j recon.zip output/recon/*
         python3 drive_upload.py recon.zip Stage_1_Recon
         tg "✅ Recon finished"
 
         ### STAGE 2: PROBING
         tg "🌐 Probing started"
-        httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt || true
+        httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt 2>/dev/null || true
         zip -j probe.zip output/probe/*
         python3 drive_upload.py probe.zip Stage_2_Probe
         tg "✅ Probing finished"
 
         ### STAGE 3: CRAWLING
         tg "🕷 Crawling started"
-        katana -l output/probe/live.txt -silent > output/crawl/katana.txt || true
-        gau $TARGET >> output/crawl/gau.txt || true
-        waybackurls $TARGET >> output/crawl/wayback.txt || true
-        hakrawler -url $TARGET > output/crawl/hakrawler.txt || true
-        gospider -s $TARGET -o output/crawl/gospider.txt || true
+        katana -l output/probe/live.txt -silent > output/crawl/katana.txt 2>/dev/null || true
+        gau $TARGET >> output/crawl/gau.txt 2>/dev/null || true
+        waybackurls $TARGET >> output/crawl/wayback.txt 2>/dev/null || true
+        hakrawler -url $TARGET > output/crawl/hakrawler.txt 2>/dev/null || true
+        gospider -s $TARGET -o output/crawl/gospider.txt 2>/dev/null || true
         zip -j crawl.zip output/crawl/*
         python3 drive_upload.py crawl.zip Stage_3_Crawl
         tg "✅ Crawling finished"
 
         ### STAGE 4: PARAMS & XSS
         tg "⚡ Parameter scan started"
-        qsreplace -w output/crawl/katana.txt > output/crawl/qsreplace.txt || true
-        kxss -list output/crawl/katana.txt > output/crawl/kxss.txt || true
-        unfurl -u $TARGET > output/crawl/unfurl.txt || true
+        qsreplace -w output/crawl/katana.txt > output/crawl/qsreplace.txt 2>/dev/null || true
+        kxss -list output/crawl/katana.txt > output/crawl/kxss.txt 2>/dev/null || true
+        unfurl -u $TARGET > output/crawl/unfurl.txt 2>/dev/null || true
         zip -j params.zip output/crawl/*
         python3 drive_upload.py params.zip Stage_4_Params
         tg "✅ Parameter scan finished"
 
         ### STAGE 5: VULNS
         tg "💥 Vulnerability scan started"
-        nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt || true
-        dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt || true
+        nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt 2>/dev/null || true
+        dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt 2>/dev/null || true
         zip -j vulns.zip output/vulns/*
         python3 drive_upload.py vulns.zip Stage_5_Vulns
         tg "✅ Vulnerability scan finished"
 
         ### STAGE 6: SECRETS
         tg "🔑 Secrets scan started"
-        trufflehog filesystem . > output/secrets/trufflehog.txt || true
-        gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true
+        trufflehog filesystem . > output/secrets/trufflehog.txt 2>/dev/null || true
+        gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null || true
         zip -j secrets.zip output/secrets/*
         python3 drive_upload.py secrets.zip Stage_6_Secrets
         tg "🏁 ARES completed on $TARGET"
