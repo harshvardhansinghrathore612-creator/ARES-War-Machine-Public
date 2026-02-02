@@ -63,12 +63,12 @@ jobs:
         
         sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || true
 
-    - name: Install Python tools (ONLY AVAILABLE ON PyPI)
+    - name: Install Python tools (ONLY AVAILABLE ON PyPI - VERIFIED)
       run: |
         echo "Installing Python tools from PyPI..."
         pip3 install --upgrade pip --user
-        # Install ONLY tools that exist on PyPI
-        pip3 install arjun checkov s3scanner swagger-parser x8 commix phpggc --user
+        # Install ONLY tools that exist on PyPI - VERIFIED
+        pip3 install arjun checkov s3scanner swagger-parser x8 commix --user
 
     - name: Install git-secrets (AWS tool)
       run: |
@@ -123,6 +123,16 @@ jobs:
         cd $HOME/tools/tplmap
         python2 tplmap.py "$@"' | sudo tee /usr/local/bin/tplmap
         sudo chmod +x /usr/local/bin/tplmap
+
+    - name: Install phpggc (from GitHub - NOT on PyPI)
+      run: |
+        echo "Installing phpggc from GitHub..."
+        git clone --depth 1 https://github.com/ambionics/phpggc.git $HOME/tools/phpggc
+        cd $HOME/tools/phpggc
+        echo '#!/bin/bash
+        cd $HOME/tools/phpggc
+        ./phpggc "$@"' | sudo tee /usr/local/bin/phpggc
+        sudo chmod +x /usr/local/bin/phpggc
 
     - name: Install JWT Tool (from GitHub)
       run: |
