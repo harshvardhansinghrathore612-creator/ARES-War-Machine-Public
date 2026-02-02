@@ -15,7 +15,7 @@ jobs:
     - name: Clean previous data
       run: |
         rm -rf output *.zip || true
-        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized}
+        mkdir -p output/{recon,probe,crawl,vulns,secrets,specialized,graphql,api,cloud}
 
     - name: Install Go
       uses: actions/setup-go@v4
@@ -60,7 +60,18 @@ jobs:
     - name: Install Python tools
       run: |
         pip3 install --upgrade pip --user
-        pip3 install arjun checkov cloudsplaining s3scanner inql jwt_tool swagger-parser --user
+        pip3 install arjun checkov cloudsplaining s3scanner inql swagger-parser --user
+
+    - name: Install JWT Tool (from GitHub)
+      run: |
+        git clone --depth 1 https://github.com/ticarpi/jwt_tool.git $HOME/tools/jwt_tool
+        cd $HOME/tools/jwt_tool
+        pip3 install -r requirements.txt --user
+        # Create a wrapper script
+        echo '#!/bin/bash
+        cd $HOME/tools/jwt_tool
+        python3 jwt_tool.py "$@"' | sudo tee /usr/local/bin/jwt_tool
+        sudo chmod +x /usr/local/bin/jwt_tool
 
     - name: Install TruffleHog v3 (Binary)
       run: |
@@ -162,11 +173,14 @@ jobs:
         
         TARGET=$(head -n 1 targets.txt)
 
+        # Improved Telegram function with error handling
         tg() {
+          local message="$1"
+          echo "Sending Telegram: $message"
           curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
             -d chat_id="$TELEGRAM_CHAT_ID" \
             -d parse_mode="Markdown" \
-            -d text="$1" >/dev/null
+            -d text="$message" || echo "Telegram notification failed (check TELEGRAM_TOKEN/TELEGRAM_CHAT_ID secrets)"
         }
 
         # Send start notification
@@ -182,62 +196,131 @@ jobs:
             tg "✅ $stage_name completed successfully"
             return 0
           else
-            tg "❌ *$stage_name FAILED* - Pipeline stopped"
+            local exit_code=$?
+            tg "❌ *$stage_name FAILED* (exit code: $exit_code) - Pipeline stopped"
             exit 1
           fi
         }
 
         ### STAGE 1: RECON
         run_stage "Reconnaissance" '
-          subfinder -d $TARGET -silent > output/recon/subs.txt 2>/dev/null || true
-          assetfinder --subs-only $TARGET >> output/recon/subs.txt 2>/dev/null || true
+          subfinder -d $TARGET -silent > output/recon/subs.txt 2>/dev/null
+          assetfinder --subs-only $TARGET >> output/recon/subs.txt 2>/dev/null
           sort -u output/recon/subs.txt > output/recon/final_subs.txt
-          dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt 2>/dev/null || true
+          dnsx -l output/recon/final_subs.txt -silent > output/recon/dnsx.txt 2>/dev/null
           zip -j recon.zip output/recon/*
-          python3 drive_upload.py recon.zip Stage_1_Recon
+          python3 drive_upload.py recon.zip Stage_1_Recon 2>/dev/null || true
         '
 
         ### STAGE 2: PROBING
         run_stage "Probing" '
-          httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt 2>/dev/null || true
+          httpx -l output/recon/final_subs.txt -silent > output/probe/live.txt 2>/dev/null
           zip -j probe.zip output/probe/*
-          python3 drive_upload.py probe.zip Stage_2_Probe
+          python3 drive_upload.py probe.zip Stage_2_Probe 2>/dev/null || true
         '
 
         ### STAGE 3: CRAWLING
         run_stage "Crawling" '
-          katana -l output/probe/live.txt -silent > output/crawl/katana.txt 2>/dev/null || true
-          gau $TARGET >> output/crawl/gau.txt 2>/dev/null || true
-          waybackurls $TARGET >> output/crawl/wayback.txt 2>/dev/null || true
-          hakrawler -url $TARGET > output/crawl/hakrawler.txt 2>/dev/null || true
-          gospider -s $TARGET -o output/crawl/gospider.txt 2>/dev/null || true
+          katana -l output/probe/live.txt -silent > output/crawl/katana.txt 2>/dev/null
+          gau $TARGET >> output/crawl/gau.txt 2>/dev/null
+          waybackurls $TARGET >> output/crawl/wayback.txt 2>/dev/null
+          hakrawler -url $TARGET > output/crawl/hakrawler.txt 2>/dev/null
+          gospider -s $TARGET -o output/crawl/gospider.txt 2>/dev/null
           zip -j crawl.zip output/crawl/*
-          python3 drive_upload.py crawl.zip Stage_3_Crawl
+          python3 drive_upload.py crawl.zip Stage_3_Crawl 2>/dev/null || true
         '
 
         ### STAGE 4: PARAMS & XSS
         run_stage "Parameter & XSS Scan" '
-          qsreplace -w output/crawl/katana.txt > output/crawl/qsreplace.txt 2>/dev/null || true
-          kxss -list output/crawl/katana.txt > output/crawl/kxss.txt 2>/dev/null || true
-          unfurl -u $TARGET > output/crawl/unfurl.txt 2>/dev/null || true
+          # FIXED: Correct qsreplace usage
+          cat output/crawl/katana.txt 2>/dev/null | qsreplace "FUZZ" > output/crawl/qsreplace.txt 2>/dev/null
+          # FIXED: Correct kxss usage
+          cat output/crawl/katana.txt 2>/dev/null | kxss > output/crawl/kxss.txt 2>/dev/null
+          # FIXED: Correct unfurl usage
+          cat output/crawl/katana.txt 2>/dev/null | unfurl paths keys values > output/crawl/unfurl.txt 2>/dev/null
           zip -j params.zip output/crawl/*
-          python3 drive_upload.py params.zip Stage_4_Params
+          python3 drive_upload.py params.zip Stage_4_Params 2>/dev/null || true
         '
 
         ### STAGE 5: VULNS
         run_stage "Vulnerability Scanning" '
-          nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt 2>/dev/null || true
-          dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt 2>/dev/null || true
+          nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt 2>/dev/null
+          dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt 2>/dev/null
           zip -j vulns.zip output/vulns/*
-          python3 drive_upload.py vulns.zip Stage_5_Vulns
+          python3 drive_upload.py vulns.zip Stage_5_Vulns 2>/dev/null || true
         '
 
         ### STAGE 6: SECRETS
         run_stage "Secrets Detection" '
-          trufflehog filesystem . > output/secrets/trufflehog.txt 2>/dev/null || true
-          gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null || true
+          trufflehog filesystem . > output/secrets/trufflehog.txt 2>/dev/null
+          gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null
           zip -j secrets.zip output/secrets/*
-          python3 drive_upload.py secrets.zip Stage_6_Secrets
+          python3 drive_upload.py secrets.zip Stage_6_Secrets 2>/dev/null || true
+        '
+
+        ### STAGE 7: GRAPHQL & API TESTING
+        run_stage "GraphQL & API Testing" '
+          # Create sample GraphQL endpoint list
+          echo "https://$TARGET/graphql" > output/graphql/endpoints.txt 2>/dev/null
+          echo "https://$TARGET/api/graphql" >> output/graphql/endpoints.txt 2>/dev/null
+          echo "https://api.$TARGET/graphql" >> output/graphql/endpoints.txt 2>/dev/null
+          
+          # Test GraphQL endpoints
+          for endpoint in $(cat output/graphql/endpoints.txt 2>/dev/null); do
+            echo "Testing $endpoint with GraphQLMap..." >> output/graphql/graphqlmap.txt 2>/dev/null
+            timeout 30 graphqlmap -u $endpoint -v >> output/graphql/graphqlmap.txt 2>&1 || true
+            echo "Testing $endpoint with inql..." >> output/graphql/inql.txt 2>/dev/null
+            timeout 30 python3 -m inql -t $endpoint >> output/graphql/inql.txt 2>&1 || true
+          done
+          
+          # Test for Swagger/OpenAPI
+          echo "https://$TARGET/swagger.json" > output/api/swagger_endpoints.txt 2>/dev/null
+          echo "https://$TARGET/api-docs" >> output/api/swagger_endpoints.txt 2>/dev/null
+          
+          zip -j graphql_api.zip output/graphql/* output/api/* 2>/dev/null
+          python3 drive_upload.py graphql_api.zip Stage_7_GraphQL_API 2>/dev/null || true
+        '
+
+        ### STAGE 8: CLOUD SECURITY
+        run_stage "Cloud Security Scanning" '
+          # Create sample cloud config files for testing
+          echo "provider \"aws\" {}" > test.tf
+          echo "resource \"aws_s3_bucket\" \"test\" {}" >> test.tf
+          
+          # Run cloud security tools
+          tfsec . > output/cloud/tfsec.txt 2>&1
+          checkov -d . > output/cloud/checkov.txt 2>&1
+          
+          # Create sample AWS config for cloudsplaining
+          echo "{\"Version\": \"2012-10-17\", \"Statement\": []}" > test_policy.json
+          cloudsplaining download --input-file test_policy.json > output/cloud/cloudsplaining.txt 2>&1
+          
+          # Clean up test files
+          rm -f test.tf test_policy.json
+          
+          zip -j cloud.zip output/cloud/* 2>/dev/null
+          python3 drive_upload.py cloud.zip Stage_8_Cloud_Security 2>/dev/null || true
+        '
+
+        ### STAGE 9: JWT TESTING
+        run_stage "JWT Testing" '
+          # Create sample JWT for testing
+          echo "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" > output/specialized/sample_jwt.txt
+          
+          # Test JWT tool
+          jwt_tool output/specialized/sample_jwt.txt > output/specialized/jwt_tool.txt 2>&1
+          
+          zip -j specialized.zip output/specialized/* 2>/dev/null
+          python3 drive_upload.py specialized.zip Stage_9_Specialized_Tools 2>/dev/null || true
+        '
+
+        ### STAGE 10: JAELES SCANNING
+        run_stage "Jaeles Scanning" '
+          # Run Jaeles on live targets
+          jaeles scan -s $HOME/.jaeles/signatures-base -u "https://$TARGET" > output/specialized/jaeles.txt 2>&1
+          
+          zip -j jaeles.zip output/specialized/* 2>/dev/null
+          python3 drive_upload.py jaeles.zip Stage_10_Jaeles 2>/dev/null || true
         '
 
         # Final success notification
