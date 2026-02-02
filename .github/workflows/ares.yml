@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 350
 
     steps:
-    - name: Checkout
+    - name: Checkout Repo
       uses: actions/checkout@v4
 
     - name: Clean previous data
@@ -39,31 +39,31 @@ jobs:
         go install github.com/tomnomnom/unfurl@latest
         go install github.com/Emoe/kxss@latest
 
-    - name: Download binary tools
-      run: |
-        # gospider
-        curl -LO https://github.com/hakluke/gospider/releases/latest/download/gospider-linux
-        chmod +x gospider-linux
-        sudo mv gospider-linux /usr/local/bin/gospider
-
-        # findomain precompiled
-        curl -LO https://github.com/Findomain/Findomain/releases/latest/download/findomain-linux
-        chmod +x findomain-linux
-        sudo mv findomain-linux /usr/local/bin/findomain
-
     - name: Install Python tools
       run: |
-        pip3 install trufflehog gitleaks arjun detect-secrets swagger-parser tfsec checkov prowler cloudsplaining s3scanner graphqlmap inql jwt_tool
+        pip3 install --upgrade pip
+        pip3 install trufflehog arjun checkov tfsec prowler cloudsplaining s3scanner graphqlmap inql jwt_tool swagger-parser
 
     - name: Jaeles Signatures
       run: |
         jaeles config init
         git clone --depth 1 https://github.com/jaeles-project/jaeles-signatures.git $HOME/.jaeles/signatures-base || true
 
+    - name: Download precompiled binaries
+      run: |
+        # gospider
+        curl -LO https://github.com/hakluke/gospider/releases/latest/download/gospider-linux
+        chmod +x gospider-linux
+        sudo mv gospider-linux /usr/local/bin/gospider
+        # gitleaks (precompiled Go binary)
+        curl -LO https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks-linux-amd64
+        chmod +x gitleaks-linux-amd64
+        sudo mv gitleaks-linux-amd64 /usr/local/bin/gitleaks
+
     - name: Create Google Drive uploader
       run: |
         cat << 'EOF' > drive_upload.py
-        import os,sys
+        import os, sys
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
@@ -117,7 +117,6 @@ jobs:
         tg "🔍 Recon started"
         subfinder -d $TARGET -silent > output/recon/subs.txt || true
         assetfinder --subs-only $TARGET >> output/recon/subs.txt || true
-        findomain -t $TARGET -q -o output/recon/findomain.txt || true
         dnsx -l output/recon/subs.txt -silent > output/recon/dnsx.txt || true
         sort -u output/recon/subs.txt > output/recon/final_subs.txt
         zip -j recon.zip output/recon/*
@@ -138,26 +137,31 @@ jobs:
         waybackurls $TARGET >> output/crawl/wayback.txt || true
         hakrawler -url $TARGET > output/crawl/hakrawler.txt || true
         gospider -s $TARGET -o output/crawl/gospider.txt || true
-        qsreplace -w output/crawl/katana.txt > output/crawl/qsreplace.txt || true
-        unfurl -u $TARGET > output/crawl/unfurl.txt || true
-        kxss -list output/crawl/katana.txt > output/crawl/kxss.txt || true
         zip -j crawl.zip output/crawl/*
         python3 drive_upload.py crawl.zip Stage_3_Crawl
         tg "✅ Crawling finished"
 
-        ### STAGE 4: VULNS
+        ### STAGE 4: PARAMS & XSS
+        tg "⚡ Parameter scan started"
+        qsreplace -w output/crawl/katana.txt > output/crawl/qsreplace.txt || true
+        kxss -list output/crawl/katana.txt > output/crawl/kxss.txt || true
+        unfurl -u $TARGET > output/crawl/unfurl.txt || true
+        zip -j params.zip output/crawl/*
+        python3 drive_upload.py params.zip Stage_4_Params
+        tg "✅ Parameter scan finished"
+
+        ### STAGE 5: VULNS
         tg "💥 Vulnerability scan started"
         nuclei -l output/probe/live.txt -severity high,critical -o output/vulns/nuclei.txt || true
         dalfox file output/crawl/katana.txt --skip-bav -o output/vulns/dalfox.txt || true
         zip -j vulns.zip output/vulns/*
-        python3 drive_upload.py vulns.zip Stage_4_Vulns
+        python3 drive_upload.py vulns.zip Stage_5_Vulns
         tg "✅ Vulnerability scan finished"
 
-        ### STAGE 5: SECRETS
+        ### STAGE 6: SECRETS
         tg "🔑 Secrets scan started"
         trufflehog filesystem . > output/secrets/trufflehog.txt || true
         gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true
-        detect-secrets scan > output/secrets/detect_secrets.txt || true
         zip -j secrets.zip output/secrets/*
-        python3 drive_upload.py secrets.zip Stage_5_Secrets
+        python3 drive_upload.py secrets.zip Stage_6_Secrets
         tg "🏁 ARES completed on $TARGET"
