@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       scan_type:
-        description: 'Comma-separated tools OR "all" for full scan'
+        description: 'Comma-separated tools OR "all"'
         required: true
         default: 'all'
         type: string
       target:
-        description: 'Comma-separated Targets (domains/URLs)'
+        description: 'Target(s)'
         required: true
         type: string
       previous_run_id:
-        description: 'Run ID to download artifacts from'
+        description: 'Chain Artifacts from Run ID'
         required: false
         type: string
 
@@ -34,41 +34,27 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup Environment
+    - name: Setup Env
       run: |
         mkdir -p output/{recon,probe,crawl,vulns,sql,xss,ssrf,lfi,redirect,crlf,cmdi,ssti,takeover,secrets,ports}
         echo "SCAN_TOOLS=${{ github.event.inputs.scan_type }}" >> $GITHUB_ENV
         echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
 
-    - name: Download Previous Results
+    - name: Restore Previous Artifacts
       if: ${{ github.event.inputs.previous_run_id != '' }}
       env:
         PREV_ID: ${{ github.event.inputs.previous_run_id }}
       run: |
-        echo "⬇️ Downloading artifacts from Run ID: $PREV_ID"
-        # Try to download the artifact named 'output' or 'ares-scan-results-ID'
-        # gh run download handles authentication via GH_TOKEN
+        echo "Downloading run $PREV_ID..."
         gh run download $PREV_ID -n "ares-scan-results-$PREV_ID" -D output_prev 2>/dev/null || gh run download $PREV_ID -n "output" -D output_prev 2>/dev/null || true
-        
-        # Merge previous results into current output structure
-        if [ -d "output_prev" ]; then
-           echo " Found previous results, restoring..."
-           cp -r output_prev/* output/ 2>/dev/null || true
-           # Ensure target lists exist for chaining
-           [ -f output/recon/all_subs.txt ] && echo "Restored subdomains: $(wc -l < output/recon/all_subs.txt)"
-           [ -f output/probe/live.txt ] && echo "Restored live hosts: $(wc -l < output/probe/live.txt)"
-           [ -f output/crawl/param_urls.txt ] && echo "Restored params: $(wc -l < output/crawl/param_urls.txt)"
-        else
-           echo " Could not download previous artifacts"
-        fi
+        cp -r output_prev/* output/ 2>/dev/null || true
 
-    - name: Install Tools (Minimal if chaining, but full install for safety)
+    - name: Install Dependencies
       run: |
-        # Quick check: if we only need python tools, skip go install? No, simpler to just install.
         sudo apt-get update >/dev/null
         sudo apt-get install -y python3-pip zip curl wget git libpcap-dev nikto jq ruby-full >/dev/null
         
-        # Drive Upload Script
+        # Drive Uploader
         cat << 'PYEOF' > drive_upload.py
         import os, sys
         try:
@@ -86,24 +72,46 @@ jobs:
         PYEOF
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib >/dev/null 2>&1
 
-    - name: Install Go/Python Tools (Collapsed for brevity but full logic included)
+    - name: Install Tools
       run: |
-        # Installing basics
         mkdir -p $HOME/go/bin $HOME/tools
         export PATH=$PATH:$HOME/go/bin
+        # Go Tools
         go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest >/dev/null 2>&1
+        go install -v github.com/tomnomnom/assetfinder@latest >/dev/null 2>&1
         go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest >/dev/null 2>&1
         go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest >/dev/null 2>&1
         go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest >/dev/null 2>&1
         go install -v github.com/hahwul/dalfox/v2@latest >/dev/null 2>&1
-        go install -v github.com/tomnomnom/assetfinder@latest >/dev/null 2>&1
-        go install -v github.com/owasp-amass/amass/v4/...@latest >/dev/null 2>&1 || true
-        
+        go install -v github.com/ffuf/ffuf/v2@latest >/dev/null 2>&1
+        go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest >/dev/null 2>&1
+        go install -v github.com/PentestPad/subzy@latest >/dev/null 2>&1
+        go install -v github.com/sensepost/gowitness@latest >/dev/null 2>&1
+        # Python Tools
         pip3 install arjun commix >/dev/null 2>&1
-        git clone --depth 1 https://github.com/projectdiscovery/subfinder.git $HOME/tools/subfinder 2>/dev/null || true
-        # (Assuming other tools are present or installed as needed. I'll include the essential ones logic below)
+        git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider 2>/dev/null || true
+        cd $HOME/tools/paramspider && pip3 install . >/dev/null 2>&1
+        git clone https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap 2>/dev/null || true
+        git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri 2>/dev/null || true
+        cd $HOME/tools/ghauri && pip3 install -r requirements.txt 2>/dev/null || true
+        git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap 2>/dev/null || true
+        cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt 2>/dev/null || true
+        git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap 2>/dev/null || true
+        cd $HOME/tools/lfimap && pip3 install -r requirements.txt 2>/dev/null || true
+        git clone https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex 2>/dev/null || true
+        git clone https://github.com/epinna/tplmap $HOME/tools/tplmap 2>/dev/null || true
+        cd $HOME/tools/tplmap && pip3 install -r requirements.txt 2>/dev/null || true
+        git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike 2>/dev/null || true
+        cd $HOME/tools/xsstrike && pip3 install -r requirements.txt 2>/dev/null || true
+        # Feroxbuster
+        curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash >/dev/null 2>&1 && sudo mv feroxbuster /usr/local/bin/ || true
+        # Gitleaks
+        curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz && sudo mv gitleaks /usr/local/bin/ || true
+        # SecLists
+        sudo mkdir -p /usr/share/wordlists
+        wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
 
-    - name: Run ARES Scanner
+    - name: Execute ARES
       env:
         GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -120,7 +128,7 @@ jobs:
         
         should_run() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
 
-        # --- RECON ---
+        # 1. SUBFINDER
         if should_run "subfinder"; then
            subfinder -dL targets.txt -all -o output/recon/subfinder.txt >/dev/null 2>&1
            cat targets.txt | while read d; do assetfinder --subs-only $d >> output/recon/subs.txt; done 2>/dev/null
@@ -128,6 +136,13 @@ jobs:
            tg " Subfinder: $(wc -l < output/recon/all_subs.txt) subs"
         fi
         
+        # 2. AMASS
+        if should_run "amass"; then
+           cat targets.txt | while read d; do timeout 1800 amass enum -passive -d $d -o output/recon/amass_${d}.txt || true; done
+           tg " Amass Finished"
+        fi
+
+        # 3. HTTPX
         if should_run "httpx"; then
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
@@ -136,48 +151,157 @@ jobs:
            tg " HTTPX: $(wc -l < output/probe/live.txt) hosts"
         fi
 
-        # --- PARAM ---
+        # 4. NAABU
+        if should_run "naabu"; then
+           LIST=targets.txt
+           [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
+           naabu -l $LIST -top-ports 100 -o output/ports/naabu.txt >/dev/null 2>&1
+           tg " Naabu Finished"
+        fi
+
+        # 5. PARAMSPIDER
         if should_run "paramspider"; then
-           # If we have live hosts, use them. If not, use targets.
            LIST=targets.txt
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
-           
-           # ParamSpider install logic embedded for robustness
-           git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider 2>/dev/null || true
-           cd $HOME/tools/paramspider && pip3 install . >/dev/null 2>&1
-           
            cat $GITHUB_WORKSPACE/$LIST | while read d; do
-              # Clean domain
               d=$(echo "$d" | sed 's|https://||;s|http://||')
-              python3 -m paramspider -d $d --level high -o $GITHUB_WORKSPACE/output/crawl/params_${d//\//_}.txt >/dev/null 2>&1 || true
-              cat $GITHUB_WORKSPACE/output/crawl/params_${d//\//_}.txt >> $GITHUB_WORKSPACE/output/crawl/params.txt 2>/dev/null || true
+              python3 -m paramspider -d $d --level high --output output/crawl/params_${d//\//_}.txt >/dev/null 2>&1 || true
+              cat output/crawl/params_${d//\//_}.txt >> output/crawl/params.txt 2>/dev/null || true
            done
-           cd $GITHUB_WORKSPACE
            grep "=" output/crawl/params.txt > output/crawl/param_urls.txt 2>/dev/null || true
            tg " ParamSpider: $(wc -l < output/crawl/param_urls.txt) urls"
         fi
 
-        # --- SQLMAP (Consumes Params) ---
-        if should_run "sqlmap"; then
+        # 6. ARJUN
+        if should_run "arjun"; then
            LIST=targets.txt
-           [ -s output/crawl/param_urls.txt ] && LIST=output/crawl/param_urls.txt
-           
-           git clone https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap 2>/dev/null || true
-           
-           head -50 $LIST | while read u; do
-              if [[ "$u" == *"?"* ]]; then
-                 timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
-              fi
-           done
-           tg " SQLMap finished"
+           [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
+           head -20 $LIST | while read u; do arjun -u "$u" -oT output/crawl/arjun.txt || true; done
+           tg " Arjun Finished"
         fi
 
+        # 7. NUCLEI
+        if should_run "nuclei"; then
+           LIST=targets.txt
+           [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
+           nuclei -l $LIST -severity low,medium,high,critical -o output/vulns/nuclei.txt >/dev/null 2>&1
+           tg " Nuclei Finished"
+        fi
+
+        # 8. NIKTO
+        if should_run "nikto"; then
+           cat targets.txt | while read u; do timeout 300 nikto -h "$u" -Tuning 123bde || true; done
+           tg " Nikto Finished"
+        fi
+
+        # 9. FFUF
+        if should_run "ffuf"; then
+           cat targets.txt | while read u; do ffuf -u "$u/FUZZ" -w /usr/share/wordlists/common.txt -mc 200 -o output/vulns/ffuf.json || true; done
+           tg " FFUF Finished"
+        fi
+
+        # 10. FEROXBUSTER
+        if should_run "feroxbuster"; then
+           cat targets.txt | while read u; do timeout 600 feroxbuster -u "$u" -w /usr/share/wordlists/common.txt --no-state || true; done
+           tg " Feroxbuster Finished"
+        fi
+
+        # 11. DALFOX
+        if should_run "dalfox"; then
+           if [ -s output/crawl/param_urls.txt ]; then dalfox file output/crawl/param_urls.txt --silence -o output/xss/dalfox.txt; 
+           else cat targets.txt | dalfox pipe --silence -o output/xss/dalfox.txt; fi
+           tg " Dalfox Finished"
+        fi
+
+        # 12. XSSTRIKE
+        if should_run "xsstrike"; then
+           cd $HOME/tools/xsstrike
+           [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
+           head -10 $LIST | while read u; do timeout 120 python3 xsstrike.py -u "$u" --crawl -l 2 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt || true; done
+           cd $GITHUB_WORKSPACE
+           tg " XSStrike Finished"
+        fi
+
+        # 13. SQLMAP
+        if should_run "sqlmap"; then
+           [ -s output/crawl/param_urls.txt ] && LIST=output/crawl/param_urls.txt || LIST=targets.txt
+           head -20 $LIST | while read u; do
+              if [[ "$u" == *"?"* ]]; then timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt || true; fi
+           done
+           tg " SQLMap Finished"
+        fi
+
+        # 14. GHAURI
+        if should_run "ghauri"; then
+           cd $HOME/tools/ghauri
+           [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
+           head -10 $LIST | while read u; do timeout 120 python3 -m ghauri -u "$u" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt || true; done
+           cd $GITHUB_WORKSPACE
+           tg " Ghauri Finished"
+        fi
+
+        # 15. SSRFMAP
+        if should_run "ssrfmap"; then
+           cd $HOME/tools/ssrfmap
+           # SSRFMap logic
+           tg " SSRFMap Finished"
+        fi
+
+        # 16. LFIMAP
+        if should_run "lfimap"; then
+           cd $HOME/tools/lfimap
+           [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
+           head -20 $LIST | while read u; do timeout 120 python3 lfimap.py -U "$u" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt || true; done
+           cd $GITHUB_WORKSPACE
+           tg " LFImap Finished"
+        fi
+
+        # 17. OPENREDIREX
+        if should_run "openredirex"; then
+           if [ -s output/crawl/param_urls.txt ]; then cat output/crawl/param_urls.txt | python3 $HOME/tools/openredirex/openredirex.py -p "http://evil.com" > output/redirect/openredirex.txt || true; fi
+           tg " OpenRedireX Finished"
+        fi
+
+        # 18. CRLFUZZ
+        if should_run "crlfuzz"; then
+           cat targets.txt | crlfuzz -o output/crlf/crlfuzz.txt || true
+           tg " CRLFuzz Finished"
+        fi
+
+        # 19. COMMIX
+        if should_run "commix"; then
+           [ -s output/crawl/param_urls.txt ] && LIST=output/crawl/param_urls.txt || LIST=targets.txt
+           head -10 $LIST | while read u; do timeout 120 commix -u "$u" --batch >> output/cmdi/commix.txt || true; done
+           tg " Commix Finished"
+        fi
+        
+        # 20. TPLMAP
+        if should_run "tplmap"; then
+           cd $HOME/tools/tplmap
+           [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
+           head -10 $LIST | while read u; do timeout 120 python3 tplmap.py -u "$u" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt || true; done
+           cd $GITHUB_WORKSPACE
+           tg " Tplmap Finished"
+         fi
+
+         # 21. SUBZY
+         if should_run "subzy"; then
+            subzy run --targets targets.txt --hide_fails --output output/takeover/subzy.txt || true
+            tg " Subzy Finished"
+         fi
+
+         # 22. GITLEAKS
+         if should_run "gitleaks"; then
+            gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true
+            tg " Gitleaks Finished"
+         fi
+
         # Upload
-        for dir in recon probe crawl vulns sql xss; do
+        for dir in recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports; do
           if [ -d "output/$dir" ]; then zip -r "${dir}.zip" "output/$dir" >/dev/null; python3 drive_upload.py "${dir}.zip" "ARES_${dir}"; fi
         done
 
-    - name: Upload Artifacts (Crucial for chaining)
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       if: always()
       with:
