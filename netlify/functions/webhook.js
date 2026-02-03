@@ -56,7 +56,8 @@ async function getArtifacts() {
 
 async function deleteArtifact(id) {
   const res = await req('DELETE', 'api.github.com', `/repos/${GH_REPO}/actions/artifacts/${id}`, null, { 'Authorization': `token ${GH_TOKEN}` });
-  return res && (res.status === 204 || res.statusCode === 204);
+  if (res && (res.status === 204 || res.statusCode === 204)) return true;
+  throw new Error(`API ${res.status||res.statusCode||'Error'}`);
 }
 
 exports.handler = async (event) => {
@@ -69,13 +70,15 @@ exports.handler = async (event) => {
     const data = update.callback_query?.data;
 
     if (!chatId) return { statusCode: 200, body: 'OK' };
-    if (update.callback_query) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
+    // Handle Callback generically later to avoid duplicates, but specific handlers need it too.
+    // We defer answerCallbackQuery to logic blocks for specific alerts.
 
     if (!SESSIONS[chatId]) SESSIONS[chatId] = { step: 'MENU', selected: [], configs: [] };
     const sess = SESSIONS[chatId];
 
     // --- MENU ---
     if (text === '/start' || data === 'menu') {
+      if(data) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
       sess.step = 'MENU'; sess.selected = []; sess.configs = [];
       await tg('sendMessage', { chat_id: chatId, text: ' *ARES Scanner*\n\nSystem Online.', parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: [
@@ -89,6 +92,7 @@ exports.handler = async (event) => {
 
     // --- SELECTION ---
     if (data === 'custom_setup' || data?.startsWith('toggle:')) {
+      if(data) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
       if (data.startsWith('toggle:')) {
         const id = data.split(':')[1];
         if (sess.selected.includes(id)) sess.selected = sess.selected.filter(x => x !== id);
@@ -148,9 +152,9 @@ exports.handler = async (event) => {
 
     // --- CONFIG START ---
     if (data === 'config_start') {
+      if(data) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
       if (!sess.selected || sess.selected.length === 0) {
-          // SAFETY GUARD: If session died, warn user instead of crashing
-          return tg('editMessageText', { chat_id: chatId, message_id: msgId, text: ' Session expired (Stateless). Please Select Tools again.', reply_markup: { inline_keyboard: [[{text:'Back',callback_data:'custom_setup'}]] } });
+          return tg('editMessageText', { chat_id: chatId, message_id: msgId, text: ' Session expired. Please Select Tools again.', reply_markup: { inline_keyboard: [[{text:'Back',callback_data:'custom_setup'}]] } });
       }
       sess.step = 'CONFIG'; sess.configIdx = 0; sess.configs = [];
       await showWizardStep(chatId, msgId, 0);
@@ -159,6 +163,7 @@ exports.handler = async (event) => {
 
     // --- CONFIG INPUT ---
     if (sess.step === 'CONFIG' && (text || data?.startsWith('use_'))) {
+      if (data && !data.startsWith('dummy')) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
       if (!sess.selected || sess.configIdx >= sess.selected.length) return tg('sendMessage', { chat_id: chatId, text: 'Session error. /start' });
       
       const tId = sess.selected[sess.configIdx];
@@ -199,6 +204,7 @@ exports.handler = async (event) => {
 
     // --- LAUNCH ---
     if (data === 'launch') {
+      await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id, text: 'Launching...' });
       sess.step = 'MENU';
       let res = ' *Launching:*\n\n';
       for (const c of sess.configs) {
@@ -212,24 +218,37 @@ exports.handler = async (event) => {
     
     // --- DELETE / FULL ---
     if (data === 'delete_menu') {
+       if(data) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
        const list = await getArtifacts().catch(()=>({}));
        const kb = [];
-       if(list.artifacts) list.artifacts.slice(0,8).forEach(a=>kb.push([{text:` ${a.name}`,callback_data:`del:${a.id}`}]));
+       if(list.artifacts) list.artifacts.slice(0,8).forEach(a=>kb.push([{text:` ${a.name} (${(a.size_in_bytes/1024).toFixed(0)}KB)`,callback_data:`del:${a.id}`}]));
        kb.push([{text:'Back',callback_data:'menu'}]);
-       await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Delete:', reply_markup: { inline_keyboard: kb } });
+       await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Tap to Delete Permanently:', reply_markup: { inline_keyboard: kb } });
     }
-    if (data?.startsWith('del:')) { await deleteArtifact(data.split(':')[1]); await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id, text: 'Deleted' }); }
+    if (data?.startsWith('del:')) { 
+       try {
+           await deleteArtifact(data.split(':')[1]);
+           await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id, text: 'Deleted Successfully! ' });
+           // Refresh list by re-invoking delete_menu logic?? 
+           // Simpler: Just remove the button? Difficult in stateless. 
+           // User can click Back then Delete again to refresh.
+       } catch(e) {
+           await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id, text: ` ${e.message}`, show_alert: true });
+       }
+    }
 
-    if (data === 'full_start') { sess.step = 'FULL_TARGET'; await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Enter Target:' }); }
+    if (data === 'full_start') { 
+        if(data) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
+        sess.step = 'FULL_TARGET'; await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Enter Target:' }); 
+    }
     if (sess.step === 'FULL_TARGET' && text) { await triggerWorkflow('all', text); sess.step = 'MENU'; await tg('sendMessage', { chat_id: chatId, text: 'Started', reply_markup:{inline_keyboard:[[{text:'Menu',callback_data:'menu'}]]} }); }
 
     return { statusCode: 200, body: 'OK' };
   } catch (e) {
     console.error(e);
-    // Try to report error
     try { 
       const chat = JSON.parse(event.body).message?.chat?.id || JSON.parse(event.body).callback_query?.message?.chat?.id;
-      if(chat) await tg('sendMessage', {chat_id:chat, text:` Crash: ${e.message}`});
+      if(chat) await tg('sendMessage', {chat_id:chat, text:` Bot Error: ${e.message}`});
     } catch(err){}
     return { statusCode: 200, body: 'OK' };
   }
