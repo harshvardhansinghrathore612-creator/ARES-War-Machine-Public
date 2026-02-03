@@ -25,7 +25,7 @@ env:
 jobs:
   ares-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 720
+    timeout-minutes: 900 # Bump to 15 hours for Deep Scans
     permissions:
       contents: read
       actions: read
@@ -75,24 +75,13 @@ jobs:
                 
             service = build("drive","v3",credentials=creds)
             folder_name, file_path = sys.argv[2], sys.argv[1]
-            
-            # Find Parent Folder
             parent = os.environ.get("GDRIVE_FOLDER_ID")
-            if not parent: raise Exception("GDRIVE_FOLDER_ID is missing!")
-
-            # Find/Create Subfolder (e.g. ARES_recon)
+            if not parent: raise Exception("GDRIVE_FOLDER_ID missing!")
             q = f"name='{folder_name}' and '{parent}' in parents and mimeType='application/vnd.google-apps.folder'"
-            results = service.files().list(q=q).execute().get("files",[])
-            if results:
-                fid = results[0]["id"]
-            else:
-                fid = service.files().create(body={"name":folder_name,"parents":[parent],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
-                
-            # Upload File
-            media = MediaFileUpload(file_path)
-            file = service.files().create(body={"name":os.path.basename(file_path),"parents":[fid]}, media_body=media).execute()
+            res = service.files().list(q=q).execute().get("files",[])
+            fid = res[0]["id"] if res else service.files().create(body={"name":folder_name,"parents":[parent],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
+            file = service.files().create(body={"name":os.path.basename(file_path),"parents":[fid]}, media_body=MediaFileUpload(file_path)).execute()
             print(f" Uploaded! ID: {file.get('id')}")
-            
         except Exception as e:
             print(f" UPLOAD FAILED: {e}")
             traceback.print_exc()
@@ -105,7 +94,6 @@ jobs:
       run: |
         TOOLS="$SCAN_TOOLS"
         should_install() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
-        
         export PATH=$PATH:$HOME/go/bin:$HOME/.local/bin
 
         if should_install "subfinder"; then go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest; fi
@@ -167,7 +155,8 @@ jobs:
         
         if should_install "feroxbuster" || should_install "ffuf"; then
             sudo mkdir -p /usr/share/wordlists
-            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
+            # Upgrade: Download bigger wordlist for Deep Scan
+            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt -O /usr/share/wordlists/common.txt
         fi
 
     - name: Execute ARES
@@ -182,12 +171,11 @@ jobs:
         TOOLS="$SCAN_TOOLS"
         echo "$TARGET" | tr ',' '\n' > targets.txt
         tg() { [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" || true; }
-
-        tg " *Run Started*\nTools: \`$TOOLS\`\nTargets: \`$TARGET\`"
+        tg " *Run Started (Deep Scan)*\nTools: \`$TOOLS\`\nTargets: \`$TARGET\`"
         
         should_run() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
 
-        # 1. SUBFINDER
+        # 1. SUBFINDER (Deep: Default -all is already deep)
         if should_run "subfinder"; then
            echo "--- RUNNING SUBFINDER ---"
            subfinder -dL targets.txt -all -v -o output/recon/subfinder.txt
@@ -196,33 +184,35 @@ jobs:
            tg " Subfinder: $(wc -l < output/recon/all_subs.txt) subs"
         fi
         
-        # 2. AMASS
+        # 2. AMASS (Deep: Increased timeout)
         if should_run "amass"; then
            echo "--- RUNNING AMASS ---"
-           cat targets.txt | while read d; do timeout 1800 amass enum -passive -d $d -o output/recon/amass_${d}.txt || true; done
+           cat targets.txt | while read d; do timeout 3600 amass enum -passive -d $d -o output/recon/amass_${d}.txt || true; done
            tg " Amass Finished"
         fi
 
-        # 3. HTTPX
+        # 3. HTTPX (Deep: More ports)
         if should_run "httpx"; then
            echo "--- RUNNING HTTPX ---"
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
-           httpx -l $LIST -ports 80,443 -threads 50 -title -verbose -o output/probe/httpx.txt
+           # Ports 80,443 + 8000,8080,8443,8888,9000,9090
+           httpx -l $LIST -ports 80,443,8000,8080,8443,8888,9000,9090 -threads 100 -title -tech-detect -verbose -o output/probe/httpx.txt
            cat output/probe/httpx.txt | cut -d" " -f1 > output/probe/live.txt
            tg " HTTPX: $(wc -l < output/probe/live.txt) hosts"
         fi
 
-        # 4. NAABU
+        # 4. NAABU (Deep: Top 1000 ports)
         if should_run "naabu"; then
            echo "--- RUNNING NAABU ---"
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
-           naabu -l $LIST -top-ports 100 -v -o output/ports/naabu.txt
+           # Upgrade: -top-ports 1000
+           naabu -l $LIST -top-ports 1000 -v -o output/ports/naabu.txt
            tg " Naabu Finished"
         fi
 
-        # 5. PARAMSPIDER
+        # 5. PARAMSPIDER (Deep: High level default)
         if should_run "paramspider"; then
            echo "--- RUNNING PARAMSPIDER ---"
            LIST=targets.txt
@@ -236,46 +226,47 @@ jobs:
            tg " ParamSpider: $(wc -l < output/crawl/param_urls.txt) urls"
         fi
 
-        # 6. ARJUN
+        # 6. ARJUN (Deep: Defaults good)
         if should_run "arjun"; then
            echo "--- RUNNING ARJUN ---"
            LIST=targets.txt
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
-           head -20 $LIST | while read u; do arjun -u "$u" -oT output/crawl/arjun.txt || true; done
+           head -50 $LIST | while read u; do arjun -u "$u" -oT output/crawl/arjun.txt || true; done
            tg " Arjun Finished"
         fi
 
-        # 7. NUCLEI
+        # 7. NUCLEI (Deep: Update Templates + Low severity too)
         if should_run "nuclei"; then
            echo "--- RUNNING NUCLEI ---"
+           nuclei -update-templates >/dev/null 2>&1 || true
            LIST=targets.txt
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
            nuclei -l $LIST -severity low,medium,high,critical -v -o output/vulns/nuclei.txt
            tg " Nuclei Finished"
         fi
 
-        # 8. NIKTO
+        # 8. NIKTO (Deep: Long timeout)
         if should_run "nikto"; then
            echo "--- RUNNING NIKTO ---"
-           cat targets.txt | while read u; do timeout 300 nikto -h "$u" -Tuning 123bde || true; done
+           cat targets.txt | while read u; do timeout 600 nikto -h "$u" -Tuning 123bde || true; done
            tg " Nikto Finished"
         fi
 
-        # 9. FFUF
+        # 9. FFUF (Deep: Recursion + Bigger Wordlist)
         if should_run "ffuf"; then
            echo "--- RUNNING FFUF ---"
-           cat targets.txt | while read u; do ffuf -u "$u/FUZZ" -w /usr/share/wordlists/common.txt -mc 200 -o output/vulns/ffuf.json || true; done
+           cat targets.txt | while read u; do ffuf -u "$u/FUZZ" -w /usr/share/wordlists/common.txt -recursion -recursion-depth 2 -mc 200 -o output/vulns/ffuf.json || true; done
            tg " FFUF Finished"
         fi
 
-        # 10. FEROXBUSTER
+        # 10. FEROXBUSTER (Deep: Recursion default)
         if should_run "feroxbuster"; then
            echo "--- RUNNING FEROXBUSTER ---"
-           cat targets.txt | while read u; do timeout 600 feroxbuster -u "$u" -w /usr/share/wordlists/common.txt --no-state || true; done
+           cat targets.txt | while read u; do timeout 1200 feroxbuster -u "$u" -w /usr/share/wordlists/common.txt --no-state || true; done
            tg " Feroxbuster Finished"
         fi
 
-        # 11. DALFOX
+        # 11. DALFOX (Deep: Pipe mode full)
         if should_run "dalfox"; then
            echo "--- RUNNING DALFOX ---"
            if [ -s output/crawl/param_urls.txt ]; then dalfox file output/crawl/param_urls.txt --silence -o output/xss/dalfox.txt; 
@@ -283,22 +274,23 @@ jobs:
            tg " Dalfox Finished"
         fi
 
-        # 12. XSSTRIKE
+        # 12. XSSTRIKE (Deep: Crawl Level 3)
         if should_run "xsstrike"; then
            echo "--- RUNNING XSSTRIKE ---"
            cd $HOME/tools/xsstrike
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           head -10 $LIST | while read u; do timeout 120 python3 xsstrike.py -u "$u" --crawl -l 2 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt || true; done
+           # Upgrade: -l 3 (Level 3 crawl)
+           head -20 $LIST | while read u; do timeout 300 python3 xsstrike.py -u "$u" --crawl -l 3 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " XSStrike Finished"
         fi
 
-        # 13. SQLMAP
+        # 13. SQLMAP (Deep: Level 3 Risk 2)
         if should_run "sqlmap"; then
            echo "--- RUNNING SQLMAP ---"
            [ -s output/crawl/param_urls.txt ] && LIST=output/crawl/param_urls.txt || LIST=targets.txt
-           head -20 $LIST | while read u; do
-              if [[ "$u" == *"?"* ]]; then timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 2 -v 3 >> output/sql/sqlmap.txt || true; fi
+           head -50 $LIST | while read u; do
+              if [[ "$u" == *"?"* ]]; then timeout 600 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 3 -v 3 >> output/sql/sqlmap.txt || true; fi
            done
            tg " SQLMap Finished"
         fi
@@ -308,7 +300,7 @@ jobs:
            echo "--- RUNNING GHAURI ---"
            cd $HOME/tools/ghauri
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           head -10 $LIST | while read u; do timeout 120 python3 -m ghauri -u "$u" --batch -v >> $GITHUB_WORKSPACE/output/sql/ghauri.txt || true; done
+           head -20 $LIST | while read u; do timeout 300 python3 -m ghauri -u "$u" --batch --level 3 -v >> $GITHUB_WORKSPACE/output/sql/ghauri.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " Ghauri Finished"
         fi
@@ -325,7 +317,7 @@ jobs:
            echo "--- RUNNING LFIMAP ---"
            cd $HOME/tools/lfimap
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           head -20 $LIST | while read u; do timeout 120 python3 lfimap.py -U "$u" -v >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt || true; done
+           head -20 $LIST | while read u; do timeout 300 python3 lfimap.py -U "$u" -v >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " LFImap Finished"
         fi
@@ -348,7 +340,7 @@ jobs:
         if should_run "commix"; then
            echo "--- RUNNING COMMIX ---"
            [ -s output/crawl/param_urls.txt ] && LIST=output/crawl/param_urls.txt || LIST=targets.txt
-           head -10 $LIST | while read u; do timeout 120 commix -u "$u" --batch >> output/cmdi/commix.txt || true; done
+           head -20 $LIST | while read u; do timeout 300 commix -u "$u" --batch >> output/cmdi/commix.txt || true; done
            tg " Commix Finished"
         fi
         
@@ -357,7 +349,7 @@ jobs:
            echo "--- RUNNING TPLMAP ---"
            cd $HOME/tools/tplmap
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           head -10 $LIST | while read u; do timeout 120 python3 tplmap.py -u "$u" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt || true; done
+           head -20 $LIST | while read u; do timeout 300 python3 tplmap.py -u "$u" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " Tplmap Finished"
          fi
