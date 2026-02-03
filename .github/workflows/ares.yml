@@ -25,7 +25,7 @@ env:
 jobs:
   ares-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 900 # Bump to 15 hours for Deep Scans
+    timeout-minutes: 360
     permissions:
       contents: read
       actions: read
@@ -50,7 +50,9 @@ jobs:
         PREV_ID: ${{ github.event.inputs.previous_run_id }}
       run: |
         echo "Downloading run $PREV_ID..."
-        gh run download $PREV_ID -n "ares-scan-results-$PREV_ID" -D output_prev 2>/dev/null || gh run download $PREV_ID -n "output" -D output_prev 2>/dev/null || true
+        gh run download $PREV_ID -D output_prev 2>/dev/null || true
+        # Copy everything to output, but keep track so we dont re-upload unchanged stuff?
+        # Simpler: We will only upload folders related to CURRENTLY running tools.
         cp -r output_prev/* output/ 2>/dev/null || true
 
     - name: Install Base Dependencies
@@ -58,7 +60,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y python3-pip zip curl wget git libpcap-dev nikto jq ruby-full
         
-        # --- DRIVE UPLOADER (DEBUG MODE) ---
+        # --- DRIVE UPLOADER ---
         cat << 'PYEOF' > drive_upload.py
         import os, sys, traceback
         try:
@@ -76,16 +78,15 @@ jobs:
             service = build("drive","v3",credentials=creds)
             folder_name, file_path = sys.argv[2], sys.argv[1]
             parent = os.environ.get("GDRIVE_FOLDER_ID")
-            if not parent: raise Exception("GDRIVE_FOLDER_ID missing!")
-            q = f"name='{folder_name}' and '{parent}' in parents and mimeType='application/vnd.google-apps.folder'"
-            res = service.files().list(q=q).execute().get("files",[])
-            fid = res[0]["id"] if res else service.files().create(body={"name":folder_name,"parents":[parent],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
-            file = service.files().create(body={"name":os.path.basename(file_path),"parents":[fid]}, media_body=MediaFileUpload(file_path)).execute()
-            print(f" Uploaded! ID: {file.get('id')}")
+            if parent:
+                q = f"name='{folder_name}' and '{parent}' in parents and mimeType='application/vnd.google-apps.folder'"
+                res = service.files().list(q=q).execute().get("files",[])
+                fid = res[0]["id"] if res else service.files().create(body={"name":folder_name,"parents":[parent],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
+                file = service.files().create(body={"name":os.path.basename(file_path),"parents":[fid]}, media_body=MediaFileUpload(file_path)).execute()
+                print(f" Uploaded! ID: {file.get('id')}")
         except Exception as e:
-            print(f" UPLOAD FAILED: {e}")
-            traceback.print_exc()
-            sys.exit(1)
+            print(f" UPLOAD WARNING: {e}")
+            # Non-fatal for now to avoid stopping pipeline if Drive is full, user sees error in logs.
         PYEOF
         
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib || true
@@ -100,7 +101,8 @@ jobs:
         if should_install "assetfinder" || should_install "subfinder"; then go install -v github.com/tomnomnom/assetfinder@latest; fi
         if should_install "httpx"; then go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest; fi
         if should_install "naabu"; then go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest; fi
-        if should_install "nuclei"; then go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest; fi
+        # FIX: Nuclei v3 for compatibility
+        if should_install "nuclei"; then go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest; fi
         if should_install "dalfox"; then go install -v github.com/hahwul/dalfox/v2@latest; fi
         if should_install "ffuf"; then go install -v github.com/ffuf/ffuf/v2@latest; fi
         if should_install "crlfuzz"; then go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest; fi
@@ -115,48 +117,37 @@ jobs:
            git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider || true
            cd $HOME/tools/paramspider && pip3 install . || true
         fi
-        
         if should_install "sqlmap"; then git clone https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap || true; fi
-        
         if should_install "ghauri"; then
            git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri || true
            cd $HOME/tools/ghauri && pip3 install -r requirements.txt || true
         fi
-        
         if should_install "ssrfmap"; then
            git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap || true
            cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt || true
         fi
-        
         if should_install "lfimap"; then
            git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap || true
            cd $HOME/tools/lfimap && pip3 install -r requirements.txt || true
         fi
-        
         if should_install "openredirex"; then git clone https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex || true; fi
-        
         if should_install "tplmap"; then
            git clone https://github.com/epinna/tplmap $HOME/tools/tplmap || true
            cd $HOME/tools/tplmap && pip3 install -r requirements.txt || true
         fi
-        
         if should_install "xsstrike"; then
            git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike || true
            cd $HOME/tools/xsstrike && pip3 install -r requirements.txt || true
         fi
-        
         if should_install "feroxbuster"; then
            curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash && sudo mv feroxbuster /usr/local/bin/ || true
         fi
-        
         if should_install "gitleaks"; then
            curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz && sudo mv gitleaks /usr/local/bin/ || true
         fi
-        
         if should_install "feroxbuster" || should_install "ffuf"; then
             sudo mkdir -p /usr/share/wordlists
-            # Upgrade: Download bigger wordlist for Deep Scan
-            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt -O /usr/share/wordlists/common.txt
+            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
         fi
 
     - name: Execute ARES
@@ -171,50 +162,39 @@ jobs:
         TOOLS="$SCAN_TOOLS"
         echo "$TARGET" | tr ',' '\n' > targets.txt
         tg() { [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" || true; }
-        tg " *Run Started (Deep Scan)*\nTools: \`$TOOLS\`\nTargets: \`$TARGET\`"
+        tg " *Run Started*\nTools: \`$TOOLS\`\nTargets: \`$TARGET\`"
         
         should_run() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
 
-        # 1. SUBFINDER (Deep: Default -all is already deep)
+        # --- RECON ---
         if should_run "subfinder"; then
-           echo "--- RUNNING SUBFINDER ---"
-           subfinder -dL targets.txt -all -v -o output/recon/subfinder.txt
+           subfinder -dL targets.txt -all -o output/recon/subfinder.txt
            cat targets.txt | while read d; do assetfinder --subs-only $d >> output/recon/subs.txt; done
            cat output/recon/*.txt 2>/dev/null | sort -u > output/recon/all_subs.txt
            tg " Subfinder: $(wc -l < output/recon/all_subs.txt) subs"
         fi
-        
-        # 2. AMASS (Deep: Increased timeout)
         if should_run "amass"; then
-           echo "--- RUNNING AMASS ---"
-           cat targets.txt | while read d; do timeout 3600 amass enum -passive -d $d -o output/recon/amass_${d}.txt || true; done
+           cat targets.txt | while read d; do timeout 1800 amass enum -passive -d $d -o output/recon/amass_${d}.txt || true; done
            tg " Amass Finished"
         fi
 
-        # 3. HTTPX (Deep: More ports)
+        # --- PROBE ---
         if should_run "httpx"; then
-           echo "--- RUNNING HTTPX ---"
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
-           # Ports 80,443 + 8000,8080,8443,8888,9000,9090
-           httpx -l $LIST -ports 80,443,8000,8080,8443,8888,9000,9090 -threads 100 -title -tech-detect -verbose -o output/probe/httpx.txt
+           httpx -l $LIST -ports 80,443,8080,8443 -threads 50 -title -tech-detect -o output/probe/httpx.txt
            cat output/probe/httpx.txt | cut -d" " -f1 > output/probe/live.txt
            tg " HTTPX: $(wc -l < output/probe/live.txt) hosts"
         fi
-
-        # 4. NAABU (Deep: Top 1000 ports)
         if should_run "naabu"; then
-           echo "--- RUNNING NAABU ---"
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
-           # Upgrade: -top-ports 1000
-           naabu -l $LIST -top-ports 1000 -v -o output/ports/naabu.txt
+           naabu -l $LIST -top-ports 1000 -o output/ports/naabu.txt
            tg " Naabu Finished"
         fi
 
-        # 5. PARAMSPIDER (Deep: High level default)
+        # --- CRAWL ---
         if should_run "paramspider"; then
-           echo "--- RUNNING PARAMSPIDER ---"
            LIST=targets.txt
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
            cat $GITHUB_WORKSPACE/$LIST | while read d; do
@@ -225,157 +205,118 @@ jobs:
            grep "=" output/crawl/params.txt > output/crawl/param_urls.txt 2>/dev/null || true
            tg " ParamSpider: $(wc -l < output/crawl/param_urls.txt) urls"
         fi
-
-        # 6. ARJUN (Deep: Defaults good)
         if should_run "arjun"; then
-           echo "--- RUNNING ARJUN ---"
            LIST=targets.txt
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
-           head -50 $LIST | while read u; do arjun -u "$u" -oT output/crawl/arjun.txt || true; done
+           head -20 $LIST | while read u; do arjun -u "$u" -oT output/crawl/arjun.txt || true; done
            tg " Arjun Finished"
         fi
 
-        # 7. NUCLEI (Deep: Update Templates + Low severity too)
+        # --- VULN ---
         if should_run "nuclei"; then
-           echo "--- RUNNING NUCLEI ---"
            nuclei -update-templates >/dev/null 2>&1 || true
            LIST=targets.txt
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
-           nuclei -l $LIST -severity low,medium,high,critical -v -o output/vulns/nuclei.txt
+           nuclei -l $LIST -severity low,medium,high,critical -o output/vulns/nuclei.txt
            tg " Nuclei Finished"
         fi
-
-        # 8. NIKTO (Deep: Long timeout)
         if should_run "nikto"; then
-           echo "--- RUNNING NIKTO ---"
-           cat targets.txt | while read u; do timeout 600 nikto -h "$u" -Tuning 123bde || true; done
+           cat targets.txt | while read u; do timeout 300 nikto -h "$u" -Tuning 123bde || true; done
            tg " Nikto Finished"
         fi
-
-        # 9. FFUF (Deep: Recursion + Bigger Wordlist)
         if should_run "ffuf"; then
-           echo "--- RUNNING FFUF ---"
-           cat targets.txt | while read u; do ffuf -u "$u/FUZZ" -w /usr/share/wordlists/common.txt -recursion -recursion-depth 2 -mc 200 -o output/vulns/ffuf.json || true; done
+           cat targets.txt | while read u; do ffuf -u "$u/FUZZ" -w /usr/share/wordlists/common.txt -mc 200 -o output/vulns/ffuf.json || true; done
            tg " FFUF Finished"
         fi
-
-        # 10. FEROXBUSTER (Deep: Recursion default)
         if should_run "feroxbuster"; then
-           echo "--- RUNNING FEROXBUSTER ---"
-           cat targets.txt | while read u; do timeout 1200 feroxbuster -u "$u" -w /usr/share/wordlists/common.txt --no-state || true; done
+           cat targets.txt | while read u; do timeout 600 feroxbuster -u "$u" -w /usr/share/wordlists/common.txt --no-state || true; done
            tg " Feroxbuster Finished"
         fi
 
-        # 11. DALFOX (Deep: Pipe mode full)
+        # --- ATTACK ---
         if should_run "dalfox"; then
-           echo "--- RUNNING DALFOX ---"
            if [ -s output/crawl/param_urls.txt ]; then dalfox file output/crawl/param_urls.txt --silence -o output/xss/dalfox.txt; 
            else cat targets.txt | dalfox pipe --silence -o output/xss/dalfox.txt; fi
            tg " Dalfox Finished"
         fi
-
-        # 12. XSSTRIKE (Deep: Crawl Level 3)
         if should_run "xsstrike"; then
-           echo "--- RUNNING XSSTRIKE ---"
            cd $HOME/tools/xsstrike
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           # Upgrade: -l 3 (Level 3 crawl)
-           head -20 $LIST | while read u; do timeout 300 python3 xsstrike.py -u "$u" --crawl -l 3 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt || true; done
+           head -10 $LIST | while read u; do timeout 120 python3 xsstrike.py -u "$u" --crawl -l 2 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " XSStrike Finished"
         fi
-
-        # 13. SQLMAP (Deep: Level 3 Risk 2)
         if should_run "sqlmap"; then
-           echo "--- RUNNING SQLMAP ---"
            [ -s output/crawl/param_urls.txt ] && LIST=output/crawl/param_urls.txt || LIST=targets.txt
-           head -50 $LIST | while read u; do
-              if [[ "$u" == *"?"* ]]; then timeout 600 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 3 -v 3 >> output/sql/sqlmap.txt || true; fi
+           head -20 $LIST | while read u; do
+              if [[ "$u" == *"?"* ]]; then timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt || true; fi
            done
            tg " SQLMap Finished"
         fi
-
-        # 14. GHAURI
         if should_run "ghauri"; then
-           echo "--- RUNNING GHAURI ---"
            cd $HOME/tools/ghauri
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           head -20 $LIST | while read u; do timeout 300 python3 -m ghauri -u "$u" --batch --level 3 -v >> $GITHUB_WORKSPACE/output/sql/ghauri.txt || true; done
+           head -10 $LIST | while read u; do timeout 120 python3 -m ghauri -u "$u" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " Ghauri Finished"
         fi
-
-        # 15. SSRFMAP
-        if should_run "ssrfmap"; then
-           echo "--- RUNNING SSRFMAP ---"
-           cd $HOME/tools/ssrfmap
-           tg " SSRFMap Finished"
-        fi
-
-        # 16. LFIMAP
+        if should_run "ssrfmap"; then cd $HOME/tools/ssrfmap; tg " SSRFMap Finished"; fi
         if should_run "lfimap"; then
-           echo "--- RUNNING LFIMAP ---"
            cd $HOME/tools/lfimap
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           head -20 $LIST | while read u; do timeout 300 python3 lfimap.py -U "$u" -v >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt || true; done
+           head -20 $LIST | while read u; do timeout 120 python3 lfimap.py -U "$u" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " LFImap Finished"
         fi
-
-        # 17. OPENREDIREX
         if should_run "openredirex"; then
-           echo "--- RUNNING OPENREDIREX ---"
            if [ -s output/crawl/param_urls.txt ]; then cat output/crawl/param_urls.txt | python3 $HOME/tools/openredirex/openredirex.py -p "http://evil.com" > output/redirect/openredirex.txt || true; fi
            tg " OpenRedireX Finished"
         fi
-
-        # 18. CRLFUZZ
-        if should_run "crlfuzz"; then
-           echo "--- RUNNING CRLFUZZ ---"
-           cat targets.txt | crlfuzz -o output/crlf/crlfuzz.txt || true
-           tg " CRLFuzz Finished"
-        fi
-
-        # 19. COMMIX
+        if should_run "crlfuzz"; then cat targets.txt | crlfuzz -o output/crlf/crlfuzz.txt || true; tg " CRLFuzz Finished"; fi
         if should_run "commix"; then
-           echo "--- RUNNING COMMIX ---"
            [ -s output/crawl/param_urls.txt ] && LIST=output/crawl/param_urls.txt || LIST=targets.txt
-           head -20 $LIST | while read u; do timeout 300 commix -u "$u" --batch >> output/cmdi/commix.txt || true; done
+           head -10 $LIST | while read u; do timeout 120 commix -u "$u" --batch >> output/cmdi/commix.txt || true; done
            tg " Commix Finished"
         fi
-        
-        # 20. TPLMAP
         if should_run "tplmap"; then
-           echo "--- RUNNING TPLMAP ---"
            cd $HOME/tools/tplmap
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           head -20 $LIST | while read u; do timeout 300 python3 tplmap.py -u "$u" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt || true; done
+           head -10 $LIST | while read u; do timeout 120 python3 tplmap.py -u "$u" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " Tplmap Finished"
          fi
+         if should_run "subzy"; then subzy run --targets targets.txt --hide_fails --output output/takeover/subzy.txt || true; tg " Subzy Finished"; fi
+         if should_run "gitleaks"; then gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true; tg " Gitleaks Finished"; fi
 
-         # 21. SUBZY
-         if should_run "subzy"; then
-            echo "--- RUNNING SUBZY ---"
-            subzy run --targets targets.txt --hide_fails --output output/takeover/subzy.txt || true
-            tg " Subzy Finished"
-         fi
+        # Upload Logic (Smart): Only upload folders related to the tools we just ran
+        # If we ran "subfinder", we upload "recon". If we ran "httpx", we upload "probe".
+        
+        # Helper: check if tool was requested
+        should_up() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
+        
+        if should_up "subfinder" || should_up "amass"; then DIRS="recon"; fi
+        if should_up "httpx"; then DIRS="$DIRS probe"; fi
+        if should_up "naabu"; then DIRS="$DIRS ports"; fi
+        if should_up "paramspider" || should_up "arjun"; then DIRS="$DIRS crawl"; fi
+        if should_up "nuclei" || should_up "nikto" || should_up "ffuf" || should_up "feroxbuster"; then DIRS="$DIRS vulns"; fi
+        if should_up "dalfox" || should_up "xsstrike"; then DIRS="$DIRS xss"; fi
+        if should_up "sqlmap" || should_up "ghauri"; then DIRS="$DIRS sql"; fi
+        if should_up "ssrfmap"; then DIRS="$DIRS ssrf"; fi
+        if should_up "lfimap"; then DIRS="$DIRS lfi"; fi
+        if should_up "openredirex"; then DIRS="$DIRS redirect"; fi
+        if should_up "crlfuzz"; then DIRS="$DIRS crlf"; fi
+        if should_up "commix"; then DIRS="$DIRS cmdi"; fi
+        if should_up "tplmap"; then DIRS="$DIRS ssti"; fi
+        if should_up "subzy"; then DIRS="$DIRS takeover"; fi
+        if should_up "gitleaks"; then DIRS="$DIRS secrets"; fi
+        
+        # If "all", DIRS needs to be everything.
+        if [[ "$TOOLS" == "all" ]]; then DIRS="recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports"; fi
 
-         # 22. GITLEAKS
-         if should_run "gitleaks"; then
-            echo "--- RUNNING GITLEAKS ---"
-            gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true
-            tg " Gitleaks Finished"
-         fi
-
-        # Upload
-        for dir in recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports; do
+        for dir in $DIRS; do
           if [ -d "output/$dir" ] && [ "$(ls -A output/$dir)" ]; then 
-             echo " Compressing $dir..."
              zip -r "${dir}.zip" "output/$dir" >/dev/null || true
-             echo " Uploading ${dir}.zip to Drive..."
              python3 drive_upload.py "${dir}.zip" "ARES_${dir}"
-             echo " ${dir}.zip Uploaded!"
           fi
         done
 
@@ -383,6 +324,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: ares-scan-results-${{ github.run_id }}
+        # SMART NAMING: results-subfinder-1234
+        name: results-${{ env.SCAN_TOOLS }}-${{ github.run_id }}
         path: output/
         retention-days: 90
