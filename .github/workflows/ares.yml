@@ -57,21 +57,47 @@ jobs:
       run: |
         sudo apt-get update >/dev/null || true
         sudo apt-get install -y python3-pip zip curl wget git libpcap-dev nikto jq ruby-full >/dev/null || true
+        # --- DRIVE UPLOADER (DEBUG MODE) ---
         cat << 'PYEOF' > drive_upload.py
-        import os, sys
+        import os, sys, traceback
         try:
+            print(f" Uploading {sys.argv[1]} to {sys.argv[2]}...")
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
             from googleapiclient.http import MediaFileUpload
-            creds = Credentials(None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"), token_uri="https://oauth2.googleapis.com/token", client_id=os.environ.get("GOOGLE_CLIENT_ID"), client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"))
+            
+            creds = Credentials(None, 
+                refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"), 
+                token_uri="https://oauth2.googleapis.com/token", 
+                client_id=os.environ.get("GOOGLE_CLIENT_ID"), 
+                client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"))
+                
             service = build("drive","v3",credentials=creds)
             folder_name, file_path = sys.argv[2], sys.argv[1]
-            q = f"name='{folder_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents and mimeType='application/vnd.google-apps.folder'"
-            res = service.files().list(q=q).execute().get("files",[])
-            fid = res[0]["id"] if res else service.files().create(body={"name":folder_name,"parents":[os.environ["GDRIVE_FOLDER_ID"]],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
-            service.files().create(body={"name":os.path.basename(file_path),"parents":[fid]}, media_body=MediaFileUpload(file_path)).execute()
-        except: pass
+            
+            # Find Parent Folder
+            parent = os.environ.get("GDRIVE_FOLDER_ID")
+            if not parent: raise Exception("GDRIVE_FOLDER_ID is missing!")
+
+            # Find/Create Subfolder (e.g. ARES_recon)
+            q = f"name='{folder_name}' and '{parent}' in parents and mimeType='application/vnd.google-apps.folder'"
+            results = service.files().list(q=q).execute().get("files",[])
+            if results:
+                fid = results[0]["id"]
+            else:
+                fid = service.files().create(body={"name":folder_name,"parents":[parent],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
+                
+            # Upload File
+            media = MediaFileUpload(file_path)
+            file = service.files().create(body={"name":os.path.basename(file_path),"parents":[fid]}, media_body=media).execute()
+            print(f" Uploaded! ID: {file.get('id')}")
+            
+        except Exception as e:
+            print(f" UPLOAD FAILED: {e}")
+            traceback.print_exc()
+            sys.exit(1)
         PYEOF
+        
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib >/dev/null 2>&1
 
     - name: Install Selected Tools
@@ -327,11 +353,14 @@ jobs:
             tg " Gitleaks Finished"
          fi
 
-        # Upload Logic Fixed: Only non-empty folders
+        # Upload
         for dir in recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports; do
           if [ -d "output/$dir" ] && [ "$(ls -A output/$dir)" ]; then 
+             echo " Compressing $dir..."
              zip -r "${dir}.zip" "output/$dir" >/dev/null || true
-             python3 drive_upload.py "${dir}.zip" "ARES_${dir}" || true
+             echo " Uploading ${dir}.zip to Drive..."
+             python3 drive_upload.py "${dir}.zip" "ARES_${dir}"
+             echo " ${dir}.zip Uploaded!"
           fi
         done
 
