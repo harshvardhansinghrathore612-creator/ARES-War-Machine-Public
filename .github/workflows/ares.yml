@@ -121,7 +121,6 @@ jobs:
         
         if should_install "ghauri"; then
            git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri || true
-           # Check Deeply: Ghauri also needs install to be run as command, or use python script
            cd $HOME/tools/ghauri && pip3 install . || true
         fi
         
@@ -193,7 +192,6 @@ jobs:
         if should_run "httpx"; then
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
-           # Stable ports
            httpx -l $LIST -ports 80,443 -threads 50 -title -o output/probe/httpx.txt
            cat output/probe/httpx.txt | cut -d" " -f1 > output/probe/live.txt
            tg " HTTPX: $(wc -l < output/probe/live.txt) hosts"
@@ -201,7 +199,6 @@ jobs:
         if should_run "naabu"; then
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
-           # Stable ports 100
            naabu -l $LIST -top-ports 100 -o output/ports/naabu.txt
            tg " Naabu Finished"
         fi
@@ -212,7 +209,7 @@ jobs:
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
            cat $GITHUB_WORKSPACE/$LIST | while read d; do
               d=$(echo "$d" | sed 's|https://||;s|http://||')
-              # FIX: Use binary directly
+              # FIX: Use binary
               paramspider -d $d --level high --output output/crawl/params_${d//\//_}.txt || true
               cat output/crawl/params_${d//\//_}.txt >> output/crawl/params.txt 2>/dev/null || true
            done
@@ -231,7 +228,6 @@ jobs:
            nuclei -update-templates >/dev/null 2>&1 || true
            LIST=targets.txt
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
-           # Stable flags
            nuclei -l $LIST -severity low,medium,high,critical -o output/vulns/nuclei.txt
            tg " Nuclei Finished"
         fi
@@ -257,7 +253,6 @@ jobs:
         if should_run "xsstrike"; then
            cd $HOME/tools/xsstrike
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           # Level 2 is safe
            head -10 $LIST | while read u; do timeout 120 python3 xsstrike.py -u "$u" --crawl -l 2 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " XSStrike Finished"
@@ -271,11 +266,18 @@ jobs:
         fi
         if should_run "ghauri"; then
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           # FIX: Use binary directly
+           # FIX: Use binary
            head -10 $LIST | while read u; do timeout 120 ghauri -u "$u" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt || true; done
            tg " Ghauri Finished"
         fi
-        if should_run "ssrfmap"; then cd $HOME/tools/ssrfmap; tg " SSRFMap Finished"; fi
+        if should_run "ssrfmap"; then 
+           # FIX: Actually run the tool
+           cd $HOME/tools/ssrfmap
+           [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
+           head -10 $LIST | while read u; do timeout 60 python3 ssrfmap.py -u "$u" -m readfiles >> $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt || true; done
+           cd $GITHUB_WORKSPACE
+           tg " SSRFMap Finished"
+        fi
         if should_run "lfimap"; then
            cd $HOME/tools/lfimap
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
