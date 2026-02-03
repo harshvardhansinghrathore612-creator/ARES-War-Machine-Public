@@ -1,6 +1,8 @@
 const https = require('https');
 
 const SESSIONS = {};
+
+// ALL 22 TOOLS RESTORED
 const TOOLS = [
   { id: 'subfinder', name: 'Subfinder', cat: 'Recon', out: 'subs' },
   { id: 'amass', name: 'Amass', cat: 'Recon', out: 'subs' },
@@ -9,9 +11,19 @@ const TOOLS = [
   { id: 'paramspider', name: 'ParamSpider', cat: 'Crawl', in: 'live', out: 'params' },
   { id: 'arjun', name: 'Arjun', cat: 'Crawl', in: 'live', out: 'params' },
   { id: 'nuclei', name: 'Nuclei', cat: 'Vuln', in: 'live' },
+  { id: 'nikto', name: 'Nikto', cat: 'Vuln', in: 'live' },
+  { id: 'ffuf', name: 'FFUF', cat: 'Fuzz', in: 'live' },
+  { id: 'feroxbuster', name: 'Ferox', cat: 'Fuzz', in: 'live' },
   { id: 'dalfox', name: 'Dalfox', cat: 'XSS', in: 'params' },
+  { id: 'xsstrike', name: 'XSStrike', cat: 'XSS', in: 'params' },
   { id: 'sqlmap', name: 'SQLMap', cat: 'SQL', in: 'params' },
+  { id: 'ghauri', name: 'Ghauri', cat: 'SQL', in: 'params' },
+  { id: 'ssrfmap', name: 'SSRFmap', cat: 'SSRF', in: 'params' },
+  { id: 'lfimap', name: 'LFImap', cat: 'LFI', in: 'params' },
+  { id: 'openredirex', name: 'OpenRedireX', cat: 'Redirect', in: 'params' },
+  { id: 'crlfuzz', name: 'CRLFuzz', cat: 'CRLF', in: 'live' },
   { id: 'commix', name: 'Commix', cat: 'Cmdi', in: 'params' },
+  { id: 'tplmap', name: 'Tplmap', cat: 'SSTI', in: 'params' },
   { id: 'subzy', name: 'Subzy', cat: 'Takeover', in: 'subs' },
   { id: 'gitleaks', name: 'Gitleaks', cat: 'Secret' }
 ];
@@ -42,7 +54,7 @@ async function triggerWorkflow(scanType, target, prevId) {
 }
 
 async function getArtifacts() {
-  return req('GET', 'api.github.com', `/repos/${GH_REPO}/actions/artifacts?per_page=20`, null, { 'Authorization': `token ${GH_TOKEN}` });
+  return req('GET', 'api.github.com', `/repos/${GH_REPO}/actions/artifacts?per_page=30`, null, { 'Authorization': `token ${GH_TOKEN}` });
 }
 
 async function deleteArtifact(id) {
@@ -60,25 +72,28 @@ exports.handler = async (event) => {
     const data = update.callback_query?.data;
 
     if (!chatId) return { statusCode: 200, body: 'OK' };
+    
+    // DEBUG: Log activity to user if error occurs? No, just keep simple.
+    
     if (update.callback_query) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
 
     if (!SESSIONS[chatId]) SESSIONS[chatId] = { step: 'MENU', selected: [], configs: [] };
     const sess = SESSIONS[chatId];
 
-    // MAIN MENU
+    // --- MENU ---
     if (text === '/start' || data === 'menu') {
       sess.step = 'MENU'; sess.selected = []; sess.configs = [];
-      await tg('sendMessage', { chat_id: chatId, text: ' *ARES Scanner*\n\nChoose Mode:', parse_mode: 'Markdown',
+      await tg('sendMessage', { chat_id: chatId, text: ' *ARES Scanner*\n\nAll Tools Ready.', parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: [
-          [{ text: '🛠️ Custom / Chain Scan', callback_data: 'custom_setup' }],
-          [{ text: '🔥 Full Scan', callback_data: 'full_start' }],
-          [{ text: 'trash', callback_data: 'delete_menu' }]
+          [{ text: ' Custom / Chain Scan', callback_data: 'custom_setup' }],
+          [{ text: ' Full Scan (All 22)', callback_data: 'full_start' }],
+          [{ text: ' Data', callback_data: 'delete_menu' }]
         ]} 
       });
       return { statusCode: 200, body: 'OK' };
     }
 
-    // CUSTOM SETUP
+    // --- SELECTION ---
     if (data === 'custom_setup' || data?.startsWith('toggle:')) {
       if (data.startsWith('toggle:')) {
         const id = data.split(':')[1];
@@ -89,8 +104,12 @@ exports.handler = async (event) => {
       const kb = [];
       for (let i = 0; i < TOOLS.length; i += 2) {
         const row = [];
-        row.push({ text: `${sess.selected.includes(TOOLS[i].id)?'':''} ${TOOLS[i].name}`, callback_data: `toggle:${TOOLS[i].id}` });
-        if (TOOLS[i+1]) row.push({ text: `${sess.selected.includes(TOOLS[i+1].id)?'':''} ${TOOLS[i+1].name}`, callback_data: `toggle:${TOOLS[i+1].id}` });
+        const t1 = TOOLS[i];
+        row.push({ text: `${sess.selected.includes(t1.id)?'':''} ${t1.name}`, callback_data: `toggle:${t1.id}` });
+        if (TOOLS[i+1]) {
+           const t2 = TOOLS[i+1];
+           row.push({ text: `${sess.selected.includes(t2.id)?'':''} ${t2.name}`, callback_data: `toggle:${t2.id}` });
+        }
         kb.push(row);
       }
       kb.push([{ text: ` Next (${sess.selected.length})`, callback_data: 'config_start' }]);
@@ -103,37 +122,31 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: 'OK' };
     }
 
-    // WIZARD
+    // --- WIZARD HELPER ---
     async function showWizardStep(cId, mId, idx) {
         const t = TOOLS.find(x => x.id === sess.selected[idx]);
         const kb = [];
         let txt = ` *${t.name}*`;
         
-        // Check for compatible output from previous runs (ARTIFACT CHAINING)
+        // Previous Scan Logic
         if (t.in) {
            txt += `\nNeeds: *${t.in}*`;
-           // Fetch recent artifacts
-           const list = await getArtifacts();
-           if (list.artifacts) {
-             // Heuristic: list recent runs (last 5)
-             const recent = list.artifacts.slice(0, 5);
-             if (recent.length > 0) {
-                 kb.push([{ text: ' Use Output from Recent Scan ', callback_data: 'dummy' }]);
-                 recent.forEach(r => {
-                     // We use workflow_run.id
-                     if (r.workflow_run?.id) {
-                         const size = (r.size_in_bytes/1024).toFixed(0) + 'KB';
-                         kb.push([{ text: ` ${r.name} (${size})`, callback_data: `use_run:${r.workflow_run.id}` }]);
-                     }
-                 });
-             }
+           const list = await getArtifacts().catch(()=>({}));
+           if (list.artifacts && list.artifacts.length > 0) {
+              kb.push([{ text: ' Use Output from Recent Scan ', callback_data: 'dummy' }]);
+              list.artifacts.slice(0, 8).forEach(r => {
+                 if (r.workflow_run?.id) {
+                     // Clean up time: "2024-..."
+                     const name = r.name.replace('ares-scan-results-', 'Run ');
+                     kb.push([{ text: ` ${name}`, callback_data: `use_run:${r.workflow_run.id}` }]);
+                 }
+              });
            }
         }
         
-        // Also simple "Previous Config" check
         if (idx > 0) kb.push([{ text: `Use Previous Target`, callback_data: 'use_prev' }]);
 
-        txt += `\n Enter Target OR select chain option below:`;
+        txt += `\n Enter Target OR select option:`;
         await tg(mId ? 'editMessageText' : 'sendMessage', { chat_id: cId, message_id: mId, text: txt, parse_mode: 'Markdown', reply_markup: { inline_keyboard: kb } });
     }
 
@@ -144,7 +157,7 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: 'OK' };
     }
 
-    // CONFIG INPUT
+    // --- CONFIG INPUT ---
     if (sess.step === 'CONFIG' && (text || data?.startsWith('use_'))) {
       const tId = sess.selected[sess.configIdx];
       let target = text;
@@ -152,11 +165,11 @@ exports.handler = async (event) => {
 
       if (data === 'use_prev') {
           target = sess.configs[sess.configIdx-1].target;
-          runId = sess.configs[sess.configIdx-1].runId; // Preserve chain
+          runId = sess.configs[sess.configIdx-1].runId;
       } 
       else if (data?.startsWith('use_run:')) {
           runId = data.split(':')[1];
-          target = "CHAINED_RUN"; // Placeholder, workflow uses prev results
+          target = `RUN_${runId}`; // Placeholder
       }
 
       sess.configs.push({ tools: [tId], target, runId });
@@ -167,7 +180,7 @@ exports.handler = async (event) => {
         let s = '* Plan*\n\n';
         sess.configs.forEach(c => {
            const t = TOOLS.find(x=>x.id===c.tools[0]);
-           s += ` *${t.name}* -> ${c.runId ? ` Run ${c.runId}` : `\`${c.target}\``}\n`;
+           s += ` *${t.name}* -> ${c.runId ? `Run:${c.runId}` : `\`${c.target}\``}\n`;
         });
         await tg(data?'editMessageText':'sendMessage', { chat_id: chatId, message_id: data?msgId:undefined, text: s, parse_mode: 'Markdown',
           reply_markup: { inline_keyboard: [[{ text: ' RUN', callback_data: 'launch' }], [{ text: 'Cancel', callback_data: 'menu' }]] }
@@ -178,37 +191,43 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: 'OK' };
     }
 
-    // LAUNCH
+    // --- LAUNCH ---
     if (data === 'launch') {
       sess.step = 'MENU';
-      let res = '';
-      for (const c of sess.configs) { // Run Individually to preserve chain order strictly? Or group? 
-         // User requested: "do not runn all the tools in same workflow if user choose 1 tool keep it on different"
-         // So we run ONE BY ONE.
+      let res = ' *Scans Triggered:*\n\n';
+      for (const c of sess.configs) {
          const t = c.tools[0];
          const ok = await triggerWorkflow(t, c.target, c.runId);
-         res += ok ? ` Started ${TOOLS.find(x=>x.id===t).name}\n` : ` Error ${t}\n`;
+         res += ok ? ` ${TOOLS.find(x=>x.id===t).name}\n` : ` ${t} (Fail)\n`;
       }
-      await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: res, reply_markup: { inline_keyboard: [[{ text: 'Menu', callback_data: 'menu' }]] } });
+      await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: res, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: 'Menu', callback_data: 'menu' }]] } });
       return { statusCode: 200, body: 'OK' };
     }
 
-    // DELETE
+    // --- DELETE / OTHER ---
     if (data === 'delete_menu') {
-       const list = await getArtifacts();
-       const kb = []; if(list.artifacts) list.artifacts.slice(0,10).forEach(a=>kb.push([{text:` ${a.name}`,callback_data:`del:${a.id}`}]));
+       const list = await getArtifacts().catch(()=>({}));
+       const kb = [];
+       if (list.artifacts) list.artifacts.slice(0,8).forEach(a=>kb.push([{text:` ${a.name}`,callback_data:`del:${a.id}`}]));
        kb.push([{text:'Back',callback_data:'menu'}]);
-       await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Delete Data', reply_markup: { inline_keyboard: kb } });
+       await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Trash:', reply_markup: { inline_keyboard: kb } });
     }
     if (data?.startsWith('del:')) {
        await deleteArtifact(data.split(':')[1]);
        await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id, text: 'Deleted' });
     }
-
-    // FULL
-    if (data === 'full_start') { sess.step = 'FULL_TARGET'; await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Enter Target:' }); }
-    if (sess.step === 'FULL_TARGET' && text) { await triggerWorkflow('all', text); sess.step = 'MENU'; await tg('sendMessage', { chat_id: chatId, text: 'Started Full Scan', reply_markup:{inline_keyboard:[[{text:'Menu',callback_data:'menu'}]]} }); }
+    if (data === 'full_start') { sess.step = 'FULL_TARGET'; await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Target:' }); }
+    if (sess.step === 'FULL_TARGET' && text) { await triggerWorkflow('all', text); sess.step = 'MENU'; await tg('sendMessage', { chat_id: chatId, text: 'Started', reply_markup:{inline_keyboard:[[{text:'Menu',callback_data:'menu'}]]} }); }
 
     return { statusCode: 200, body: 'OK' };
-  } catch (e) { return { statusCode: 200, body: 'OK' }; }
+  } catch (e) {
+    console.error(e);
+    // EMERGENCY REPORT
+    try {
+        const update = JSON.parse(event.body);
+        const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+        if (chatId) await tg('sendMessage', { chat_id: chatId, text: ` Error: ${e.message}`, parse_mode: 'HTML' });
+    } catch(err) {} 
+    return { statusCode: 200, body: 'OK' };
+  }
 };
