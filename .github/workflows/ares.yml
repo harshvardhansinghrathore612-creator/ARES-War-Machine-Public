@@ -20,7 +20,7 @@ env:
 jobs:
   ares-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 720
 
     steps:
     - name: Checkout
@@ -204,7 +204,7 @@ jobs:
         ###########################################
         if should_run "amass"; then
           echo ""; echo "=== ðŸ”Ž AMASS ==="
-          timeout 1800 amass enum -passive -d $DOMAIN -o output/recon/amass.txt 2>/dev/null || true
+          amass enum -passive -d $DOMAIN -o output/recon/amass.txt 2>/dev/null || true
           cat output/recon/amass.txt >> output/recon/all_subs.txt 2>/dev/null || true
           sort -u -o output/recon/all_subs.txt output/recon/all_subs.txt
           tg "âœ… Amass complete"
@@ -216,7 +216,7 @@ jobs:
         if should_run "httpx"; then
           echo ""; echo "=== ðŸŒ HTTPX ==="
           [ ! -s output/recon/all_subs.txt ] && echo "$DOMAIN" > output/recon/all_subs.txt
-          httpx -l output/recon/all_subs.txt -ports 80,443,8080,8443 -threads 50 -timeout 10 \
+          httpx -l output/recon/all_subs.txt -ports 80,443,8080,8443 -threads 50 -\
             -status-code -title -o output/probe/httpx.txt 2>/dev/null || true
           cat output/probe/httpx.txt | cut -d" " -f1 > output/probe/live.txt
           echo "[+] Live: $(wc -l < output/probe/live.txt 2>/dev/null || echo 0)"
@@ -264,7 +264,7 @@ jobs:
           echo ""; echo "=== â˜¢ï¸ NUCLEI ==="
           [ ! -s output/probe/live.txt ] && echo "https://$DOMAIN" > output/probe/live.txt
           nuclei -l output/probe/live.txt -severity low,medium,high,critical \
-            -c 50 -timeout 10 -o output/vulns/nuclei.txt 2>/dev/null || true
+            -c 50 --o output/vulns/nuclei.txt 2>/dev/null || true
           echo "[+] Nuclei: $(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0) findings"
           tg "âœ… Nuclei: $(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0) findings"
         fi
@@ -275,7 +275,7 @@ jobs:
         if should_run "nikto"; then
           echo ""; echo "=== ðŸ”¬ NIKTO ==="
           URL="$TARGET"; [[ "$URL" != http* ]] && URL="https://$TARGET"
-          timeout 600 nikto -h "$URL" -Tuning 123bde -maxtime 300 > output/vulns/nikto.txt 2>&1 || true
+          nikto -h "$URL" -Tuning 123bde -maxtime 300 > output/vulns/nikto.txt 2>&1 || true
           tg "âœ… Nikto complete"
         fi
 
@@ -296,7 +296,7 @@ jobs:
         if should_run "feroxbuster"; then
           echo ""; echo "=== ðŸ¦€ FEROXBUSTER ==="
           URL="$TARGET"; [[ "$URL" != http* ]] && URL="https://$TARGET"
-          timeout 900 feroxbuster -u "$URL" -w /usr/share/wordlists/common.txt -t 50 -d 3 \
+          feroxbuster -u "$URL" -w /usr/share/wordlists/common.txt -t 50 -d 3 \
             -o output/vulns/feroxbuster.txt 2>/dev/null || true
           tg "âœ… Feroxbuster complete"
         fi
@@ -323,12 +323,12 @@ jobs:
           echo ""; echo "=== âš¡ XSSTRIKE ==="
           if [[ "$TARGET" == *"?"* ]]; then
             cd $HOME/tools/xsstrike
-            timeout 600 python3 xsstrike.py -u "$TARGET" --crawl -l 2 > $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
+            python3 xsstrike.py -u "$TARGET" --crawl -l 2 > $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
             cd $GITHUB_WORKSPACE
           elif [ -s output/crawl/param_urls.txt ]; then
             head -10 output/crawl/param_urls.txt | while read url; do
               cd $HOME/tools/xsstrike
-              timeout 120 python3 xsstrike.py -u "$url" >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
+              python3 xsstrike.py -u "$url" >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
               cd $GITHUB_WORKSPACE
             done
           fi
@@ -342,11 +342,11 @@ jobs:
           echo ""; echo "=== ðŸ’¾ SQLMAP ==="
           mkdir -p output/sql/sqlmap
           if [[ "$TARGET" == *"?"* ]]; then
-            timeout 900 python3 $HOME/tools/sqlmap/sqlmap.py -u "$TARGET" --batch --risk 2 --level 3 \
+            python3 $HOME/tools/sqlmap/sqlmap.py -u "$TARGET" --batch --risk 2 --level 3 \
               --threads 5 --output-dir=output/sql/sqlmap > output/sql/sqlmap.txt 2>&1 || true
           elif [ -s output/crawl/param_urls.txt ]; then
             head -15 output/crawl/param_urls.txt | while read url; do
-              timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 \
+              python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 \
                 --threads 3 >> output/sql/sqlmap.txt 2>&1 || true
             done
           else
@@ -362,12 +362,12 @@ jobs:
           echo ""; echo "=== ðŸ”¥ GHAURI ==="
           if [[ "$TARGET" == *"?"* ]]; then
             cd $HOME/tools/ghauri
-            timeout 600 python3 -m ghauri -u "$TARGET" --batch > $GITHUB_WORKSPACE/output/sql/ghauri.txt 2>&1 || true
+            python3 -m ghauri -u "$TARGET" --batch > $GITHUB_WORKSPACE/output/sql/ghauri.txt 2>&1 || true
             cd $GITHUB_WORKSPACE
           elif [ -s output/crawl/param_urls.txt ]; then
             head -10 output/crawl/param_urls.txt | while read url; do
               cd $HOME/tools/ghauri
-              timeout 120 python3 -m ghauri -u "$url" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt 2>&1 || true
+              python3 -m ghauri -u "$url" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt 2>&1 || true
               cd $GITHUB_WORKSPACE
             done
           fi
@@ -381,7 +381,7 @@ jobs:
           echo ""; echo "=== ðŸŒ SSRFMAP ==="
           if [[ "$TARGET" == *"?"* ]]; then
             cd $HOME/tools/ssrfmap
-            timeout 600 python3 ssrfmap.py -r <(echo -e "GET $TARGET HTTP/1.1\nHost: $(echo $TARGET | cut -d/ -f3)") \
+            python3 ssrfmap.py -r <(echo -e "GET $TARGET HTTP/1.1\nHost: $(echo $TARGET | cut -d/ -f3)") \
               -p url > $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt 2>&1 || true
             cd $GITHUB_WORKSPACE
           fi
@@ -395,12 +395,12 @@ jobs:
           echo ""; echo "=== ðŸ“‚ LFIMAP ==="
           if [[ "$TARGET" == *"?"* ]]; then
             cd $HOME/tools/lfimap
-            timeout 600 python3 lfimap.py -U "$TARGET" > $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
+            python3 lfimap.py -U "$TARGET" > $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
             cd $GITHUB_WORKSPACE
           elif [ -s output/crawl/param_urls.txt ]; then
             head -10 output/crawl/param_urls.txt | while read url; do
               cd $HOME/tools/lfimap
-              timeout 120 python3 lfimap.py -U "$url" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
+              python3 lfimap.py -U "$url" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
               cd $GITHUB_WORKSPACE
             done
           fi
@@ -435,10 +435,10 @@ jobs:
         if should_run "commix"; then
           echo ""; echo "=== ðŸ’€ COMMIX ==="
           if [[ "$TARGET" == *"?"* ]]; then
-            timeout 600 commix -u "$TARGET" --batch --all > output/cmdi/commix.txt 2>&1 || true
+            commix -u "$TARGET" --batch --all > output/cmdi/commix.txt 2>&1 || true
           elif [ -s output/crawl/param_urls.txt ]; then
             head -10 output/crawl/param_urls.txt | while read url; do
-              timeout 120 commix -u "$url" --batch >> output/cmdi/commix.txt 2>&1 || true
+              commix -u "$url" --batch >> output/cmdi/commix.txt 2>&1 || true
             done
           fi
           tg "âœ… Commix complete"
@@ -451,12 +451,12 @@ jobs:
           echo ""; echo "=== ðŸ“ TPLMAP (SSTI) ==="
           if [[ "$TARGET" == *"?"* ]]; then
             cd $HOME/tools/tplmap
-            timeout 600 python3 tplmap.py -u "$TARGET" > $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
+            python3 tplmap.py -u "$TARGET" > $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
             cd $GITHUB_WORKSPACE
           elif [ -s output/crawl/param_urls.txt ]; then
             head -10 output/crawl/param_urls.txt | while read url; do
               cd $HOME/tools/tplmap
-              timeout 120 python3 tplmap.py -u "$url" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
+              python3 tplmap.py -u "$url" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
               cd $GITHUB_WORKSPACE
             done
           fi
