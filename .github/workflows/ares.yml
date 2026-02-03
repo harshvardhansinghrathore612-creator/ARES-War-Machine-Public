@@ -327,9 +327,12 @@ jobs:
             tg " Gitleaks Finished"
          fi
 
-        # Upload
+        # Upload Logic Fixed: Only non-empty folders
         for dir in recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports; do
-          if [ -d "output/$dir" ]; then zip -r "${dir}.zip" "output/$dir" >/dev/null || true; python3 drive_upload.py "${dir}.zip" "ARES_${dir}" || true; fi
+          if [ -d "output/$dir" ] && [ "$(ls -A output/$dir)" ]; then 
+             zip -r "${dir}.zip" "output/$dir" >/dev/null || true
+             python3 drive_upload.py "${dir}.zip" "ARES_${dir}" || true
+          fi
         done
 
     - name: Upload Artifacts
