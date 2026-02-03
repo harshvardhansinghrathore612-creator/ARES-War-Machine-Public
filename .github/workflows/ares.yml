@@ -34,11 +34,17 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup Env
+    - name: Setup Env & Paths
       run: |
         mkdir -p output/{recon,probe,crawl,vulns,sql,xss,ssrf,lfi,redirect,crlf,cmdi,ssti,takeover,secrets,ports}
         echo "SCAN_TOOLS=${{ github.event.inputs.scan_type }}" >> $GITHUB_ENV
         echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
+        # CRITICAL: Persist PATH for subsequent steps
+        echo "$HOME/go/bin" >> $GITHUB_PATH
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        echo "$HOME/tools" >> $GITHUB_PATH
+        # Ensure directories exist
+        mkdir -p $HOME/go/bin $HOME/tools $HOME/.local/bin
 
     - name: Restore Previous Artifacts
       if: ${{ github.event.inputs.previous_run_id != '' }}
@@ -49,12 +55,11 @@ jobs:
         gh run download $PREV_ID -n "ares-scan-results-$PREV_ID" -D output_prev 2>/dev/null || gh run download $PREV_ID -n "output" -D output_prev 2>/dev/null || true
         cp -r output_prev/* output/ 2>/dev/null || true
 
-    - name: Install Dependencies
+    - name: Install Base Dependencies
       run: |
-        sudo apt-get update >/dev/null
-        sudo apt-get install -y python3-pip zip curl wget git libpcap-dev nikto jq ruby-full >/dev/null
-        
-        # Drive Uploader
+        sudo apt-get update >/dev/null || true
+        sudo apt-get install -y python3-pip zip curl wget git libpcap-dev nikto jq ruby-full >/dev/null || true
+        # Create Drive Uploader Script (Global)
         cat << 'PYEOF' > drive_upload.py
         import os, sys
         try:
@@ -72,44 +77,77 @@ jobs:
         PYEOF
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib >/dev/null 2>&1
 
-    - name: Install Tools
+    - name: Install Selected Tools
       run: |
-        mkdir -p $HOME/go/bin $HOME/tools
-        export PATH=$PATH:$HOME/go/bin
-        # Go Tools
-        go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest >/dev/null 2>&1
-        go install -v github.com/tomnomnom/assetfinder@latest >/dev/null 2>&1
-        go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest >/dev/null 2>&1
-        go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest >/dev/null 2>&1
-        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest >/dev/null 2>&1
-        go install -v github.com/hahwul/dalfox/v2@latest >/dev/null 2>&1
-        go install -v github.com/ffuf/ffuf/v2@latest >/dev/null 2>&1
-        go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest >/dev/null 2>&1
-        go install -v github.com/PentestPad/subzy@latest >/dev/null 2>&1
-        go install -v github.com/sensepost/gowitness@latest >/dev/null 2>&1
-        # Python Tools
-        pip3 install arjun commix >/dev/null 2>&1
-        git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider 2>/dev/null || true
-        cd $HOME/tools/paramspider && pip3 install . >/dev/null 2>&1
-        git clone https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap 2>/dev/null || true
-        git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri 2>/dev/null || true
-        cd $HOME/tools/ghauri && pip3 install -r requirements.txt 2>/dev/null || true
-        git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap 2>/dev/null || true
-        cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt 2>/dev/null || true
-        git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap 2>/dev/null || true
-        cd $HOME/tools/lfimap && pip3 install -r requirements.txt 2>/dev/null || true
-        git clone https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex 2>/dev/null || true
-        git clone https://github.com/epinna/tplmap $HOME/tools/tplmap 2>/dev/null || true
-        cd $HOME/tools/tplmap && pip3 install -r requirements.txt 2>/dev/null || true
-        git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike 2>/dev/null || true
-        cd $HOME/tools/xsstrike && pip3 install -r requirements.txt 2>/dev/null || true
-        # Feroxbuster
-        curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash >/dev/null 2>&1 && sudo mv feroxbuster /usr/local/bin/ || true
-        # Gitleaks
-        curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz && sudo mv gitleaks /usr/local/bin/ || true
-        # SecLists
-        sudo mkdir -p /usr/share/wordlists
-        wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
+        TOOLS="$SCAN_TOOLS"
+        should_install() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
+        
+        export PATH=$PATH:$HOME/go/bin:$HOME/.local/bin
+
+        # --- GO TOOLS ---
+        if should_install "subfinder"; then go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest >/dev/null 2>&1; fi
+        if should_install "assetfinder" || should_install "subfinder"; then go install -v github.com/tomnomnom/assetfinder@latest >/dev/null 2>&1; fi
+        if should_install "httpx"; then go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest >/dev/null 2>&1; fi
+        if should_install "naabu"; then go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest >/dev/null 2>&1; fi
+        if should_install "nuclei"; then go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest >/dev/null 2>&1; fi
+        if should_install "dalfox"; then go install -v github.com/hahwul/dalfox/v2@latest >/dev/null 2>&1; fi
+        if should_install "ffuf"; then go install -v github.com/ffuf/ffuf/v2@latest >/dev/null 2>&1; fi
+        if should_install "crlfuzz"; then go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest >/dev/null 2>&1; fi
+        if should_install "subzy"; then go install -v github.com/PentestPad/subzy@latest >/dev/null 2>&1; fi
+        if should_install "gowitness"; then go install -v github.com/sensepost/gowitness@latest >/dev/null 2>&1; fi
+        if should_install "amass"; then go install -v github.com/owasp-amass/amass/v4/...@latest >/dev/null 2>&1 || true; fi
+
+        # --- PYTHON / OTHER TOOLS ---
+        if should_install "arjun"; then pip3 install arjun >/dev/null 2>&1; fi
+        if should_install "commix"; then pip3 install commix >/dev/null 2>&1; fi
+        
+        if should_install "paramspider"; then
+           git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider 2>/dev/null || true
+           cd $HOME/tools/paramspider && pip3 install . >/dev/null 2>&1 || true
+        fi
+        
+        if should_install "sqlmap"; then git clone https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap 2>/dev/null || true; fi
+        
+        if should_install "ghauri"; then
+           git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri 2>/dev/null || true
+           cd $HOME/tools/ghauri && pip3 install -r requirements.txt >/dev/null 2>&1 || true
+        fi
+        
+        if should_install "ssrfmap"; then
+           git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap 2>/dev/null || true
+           cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt >/dev/null 2>&1 || true
+        fi
+        
+        if should_install "lfimap"; then
+           git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap 2>/dev/null || true
+           cd $HOME/tools/lfimap && pip3 install -r requirements.txt >/dev/null 2>&1 || true
+        fi
+        
+        if should_install "openredirex"; then git clone https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex 2>/dev/null || true; fi
+        
+        if should_install "tplmap"; then
+           git clone https://github.com/epinna/tplmap $HOME/tools/tplmap 2>/dev/null || true
+           cd $HOME/tools/tplmap && pip3 install -r requirements.txt >/dev/null 2>&1 || true
+        fi
+        
+        if should_install "xsstrike"; then
+           git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike 2>/dev/null || true
+           cd $HOME/tools/xsstrike && pip3 install -r requirements.txt >/dev/null 2>&1 || true
+        fi
+        
+        if should_install "feroxbuster"; then
+           curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash >/dev/null 2>&1 && sudo mv feroxbuster /usr/local/bin/ || true
+        fi
+        
+        if should_install "gitleaks"; then
+           curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz && sudo mv gitleaks /usr/local/bin/ || true
+        fi
+        
+        # Wordlists (Common)
+        if should_install "feroxbuster" || should_install "ffuf"; then
+            sudo mkdir -p /usr/share/wordlists
+            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
+        fi
 
     - name: Execute ARES
       env:
@@ -243,7 +281,8 @@ jobs:
         # 15. SSRFMAP
         if should_run "ssrfmap"; then
            cd $HOME/tools/ssrfmap
-           # SSRFMap logic
+           # SSRFMap logic (requires interaction usually, set for automation)
+           # No op for now, just logging
            tg " SSRFMap Finished"
         fi
 
@@ -296,9 +335,9 @@ jobs:
             tg " Gitleaks Finished"
          fi
 
-        # Upload
+        # Upload - Using || true to prevent partial failures from crashing job
         for dir in recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports; do
-          if [ -d "output/$dir" ]; then zip -r "${dir}.zip" "output/$dir" >/dev/null; python3 drive_upload.py "${dir}.zip" "ARES_${dir}"; fi
+          if [ -d "output/$dir" ]; then zip -r "${dir}.zip" "output/$dir" >/dev/null || true; python3 drive_upload.py "${dir}.zip" "ARES_${dir}" || true; fi
         done
 
     - name: Upload Artifacts
