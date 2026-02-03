@@ -51,8 +51,6 @@ jobs:
       run: |
         echo "Downloading run $PREV_ID..."
         gh run download $PREV_ID -D output_prev 2>/dev/null || true
-        # Copy everything to output, but keep track so we dont re-upload unchanged stuff?
-        # Simpler: We will only upload folders related to CURRENTLY running tools.
         cp -r output_prev/* output/ 2>/dev/null || true
 
     - name: Install Base Dependencies
@@ -86,7 +84,6 @@ jobs:
                 print(f" Uploaded! ID: {file.get('id')}")
         except Exception as e:
             print(f" UPLOAD WARNING: {e}")
-            # Non-fatal for now to avoid stopping pipeline if Drive is full, user sees error in logs.
         PYEOF
         
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib || true
@@ -97,11 +94,11 @@ jobs:
         should_install() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
         export PATH=$PATH:$HOME/go/bin:$HOME/.local/bin
 
+        # GO TOOLS
         if should_install "subfinder"; then go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest; fi
         if should_install "assetfinder" || should_install "subfinder"; then go install -v github.com/tomnomnom/assetfinder@latest; fi
         if should_install "httpx"; then go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest; fi
         if should_install "naabu"; then go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest; fi
-        # FIX: Nuclei v3 for compatibility
         if should_install "nuclei"; then go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest; fi
         if should_install "dalfox"; then go install -v github.com/hahwul/dalfox/v2@latest; fi
         if should_install "ffuf"; then go install -v github.com/ffuf/ffuf/v2@latest; fi
@@ -110,41 +107,54 @@ jobs:
         if should_install "gowitness"; then go install -v github.com/sensepost/gowitness@latest; fi
         if should_install "amass"; then go install -v github.com/owasp-amass/amass/v4/...@latest || true; fi
 
+        # PYTHON TOOLS (PIP)
         if should_install "arjun"; then pip3 install arjun; fi
         if should_install "commix"; then pip3 install commix; fi
         
+        # PYTHON TOOLS (SOURCE)
         if should_install "paramspider"; then
            git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider || true
            cd $HOME/tools/paramspider && pip3 install . || true
         fi
+        
         if should_install "sqlmap"; then git clone https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap || true; fi
+        
         if should_install "ghauri"; then
            git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri || true
-           cd $HOME/tools/ghauri && pip3 install -r requirements.txt || true
+           # Check Deeply: Ghauri also needs install to be run as command, or use python script
+           cd $HOME/tools/ghauri && pip3 install . || true
         fi
+        
         if should_install "ssrfmap"; then
            git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap || true
            cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt || true
         fi
+        
         if should_install "lfimap"; then
            git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap || true
            cd $HOME/tools/lfimap && pip3 install -r requirements.txt || true
         fi
+        
         if should_install "openredirex"; then git clone https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex || true; fi
+        
         if should_install "tplmap"; then
            git clone https://github.com/epinna/tplmap $HOME/tools/tplmap || true
            cd $HOME/tools/tplmap && pip3 install -r requirements.txt || true
         fi
+        
         if should_install "xsstrike"; then
            git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike || true
            cd $HOME/tools/xsstrike && pip3 install -r requirements.txt || true
         fi
+        
         if should_install "feroxbuster"; then
            curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash && sudo mv feroxbuster /usr/local/bin/ || true
         fi
+        
         if should_install "gitleaks"; then
            curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz && sudo mv gitleaks /usr/local/bin/ || true
         fi
+        
         if should_install "feroxbuster" || should_install "ffuf"; then
             sudo mkdir -p /usr/share/wordlists
             wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
@@ -165,6 +175,7 @@ jobs:
         tg " *Run Started*\nTools: \`$TOOLS\`\nTargets: \`$TARGET\`"
         
         should_run() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
+        export PATH=$PATH:$HOME/go/bin:$HOME/.local/bin
 
         # --- RECON ---
         if should_run "subfinder"; then
@@ -182,14 +193,16 @@ jobs:
         if should_run "httpx"; then
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
-           httpx -l $LIST -ports 80,443,8080,8443 -threads 50 -title -tech-detect -o output/probe/httpx.txt
+           # Stable ports
+           httpx -l $LIST -ports 80,443 -threads 50 -title -o output/probe/httpx.txt
            cat output/probe/httpx.txt | cut -d" " -f1 > output/probe/live.txt
            tg " HTTPX: $(wc -l < output/probe/live.txt) hosts"
         fi
         if should_run "naabu"; then
            LIST=targets.txt
            [ -s output/recon/all_subs.txt ] && LIST=output/recon/all_subs.txt
-           naabu -l $LIST -top-ports 1000 -o output/ports/naabu.txt
+           # Stable ports 100
+           naabu -l $LIST -top-ports 100 -o output/ports/naabu.txt
            tg " Naabu Finished"
         fi
 
@@ -199,7 +212,8 @@ jobs:
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
            cat $GITHUB_WORKSPACE/$LIST | while read d; do
               d=$(echo "$d" | sed 's|https://||;s|http://||')
-              python3 -m paramspider -d $d --level high --output output/crawl/params_${d//\//_}.txt || true
+              # FIX: Use binary directly
+              paramspider -d $d --level high --output output/crawl/params_${d//\//_}.txt || true
               cat output/crawl/params_${d//\//_}.txt >> output/crawl/params.txt 2>/dev/null || true
            done
            grep "=" output/crawl/params.txt > output/crawl/param_urls.txt 2>/dev/null || true
@@ -217,6 +231,7 @@ jobs:
            nuclei -update-templates >/dev/null 2>&1 || true
            LIST=targets.txt
            [ -s output/probe/live.txt ] && LIST=output/probe/live.txt
+           # Stable flags
            nuclei -l $LIST -severity low,medium,high,critical -o output/vulns/nuclei.txt
            tg " Nuclei Finished"
         fi
@@ -242,6 +257,7 @@ jobs:
         if should_run "xsstrike"; then
            cd $HOME/tools/xsstrike
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
+           # Level 2 is safe
            head -10 $LIST | while read u; do timeout 120 python3 xsstrike.py -u "$u" --crawl -l 2 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt || true; done
            cd $GITHUB_WORKSPACE
            tg " XSStrike Finished"
@@ -254,10 +270,9 @@ jobs:
            tg " SQLMap Finished"
         fi
         if should_run "ghauri"; then
-           cd $HOME/tools/ghauri
            [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ] && LIST=$GITHUB_WORKSPACE/output/crawl/param_urls.txt || LIST=$GITHUB_WORKSPACE/targets.txt
-           head -10 $LIST | while read u; do timeout 120 python3 -m ghauri -u "$u" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt || true; done
-           cd $GITHUB_WORKSPACE
+           # FIX: Use binary directly
+           head -10 $LIST | while read u; do timeout 120 ghauri -u "$u" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt || true; done
            tg " Ghauri Finished"
         fi
         if should_run "ssrfmap"; then cd $HOME/tools/ssrfmap; tg " SSRFMap Finished"; fi
@@ -288,10 +303,7 @@ jobs:
          if should_run "subzy"; then subzy run --targets targets.txt --hide_fails --output output/takeover/subzy.txt || true; tg " Subzy Finished"; fi
          if should_run "gitleaks"; then gitleaks detect --no-git -v > output/secrets/gitleaks.txt || true; tg " Gitleaks Finished"; fi
 
-        # Upload Logic (Smart): Only upload folders related to the tools we just ran
-        # If we ran "subfinder", we upload "recon". If we ran "httpx", we upload "probe".
-        
-        # Helper: check if tool was requested
+        # Upload Logic
         should_up() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
         
         if should_up "subfinder" || should_up "amass"; then DIRS="recon"; fi
@@ -310,7 +322,6 @@ jobs:
         if should_up "subzy"; then DIRS="$DIRS takeover"; fi
         if should_up "gitleaks"; then DIRS="$DIRS secrets"; fi
         
-        # If "all", DIRS needs to be everything.
         if [[ "$TOOLS" == "all" ]]; then DIRS="recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports"; fi
 
         for dir in $DIRS; do
@@ -324,7 +335,6 @@ jobs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        # SMART NAMING: results-subfinder-1234
         name: results-${{ env.SCAN_TOOLS }}-${{ github.run_id }}
         path: output/
         retention-days: 90
