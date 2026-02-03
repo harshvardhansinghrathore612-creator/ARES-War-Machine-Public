@@ -39,11 +39,9 @@ jobs:
         mkdir -p output/{recon,probe,crawl,vulns,sql,xss,ssrf,lfi,redirect,crlf,cmdi,ssti,takeover,secrets,ports}
         echo "SCAN_TOOLS=${{ github.event.inputs.scan_type }}" >> $GITHUB_ENV
         echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
-        # CRITICAL: Persist PATH for subsequent steps
         echo "$HOME/go/bin" >> $GITHUB_PATH
         echo "$HOME/.local/bin" >> $GITHUB_PATH
         echo "$HOME/tools" >> $GITHUB_PATH
-        # Ensure directories exist
         mkdir -p $HOME/go/bin $HOME/tools $HOME/.local/bin
 
     - name: Restore Previous Artifacts
@@ -59,7 +57,6 @@ jobs:
       run: |
         sudo apt-get update >/dev/null || true
         sudo apt-get install -y python3-pip zip curl wget git libpcap-dev nikto jq ruby-full >/dev/null || true
-        # Create Drive Uploader Script (Global)
         cat << 'PYEOF' > drive_upload.py
         import os, sys
         try:
@@ -84,7 +81,6 @@ jobs:
         
         export PATH=$PATH:$HOME/go/bin:$HOME/.local/bin
 
-        # --- GO TOOLS ---
         if should_install "subfinder"; then go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest >/dev/null 2>&1; fi
         if should_install "assetfinder" || should_install "subfinder"; then go install -v github.com/tomnomnom/assetfinder@latest >/dev/null 2>&1; fi
         if should_install "httpx"; then go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest >/dev/null 2>&1; fi
@@ -97,7 +93,6 @@ jobs:
         if should_install "gowitness"; then go install -v github.com/sensepost/gowitness@latest >/dev/null 2>&1; fi
         if should_install "amass"; then go install -v github.com/owasp-amass/amass/v4/...@latest >/dev/null 2>&1 || true; fi
 
-        # --- PYTHON / OTHER TOOLS ---
         if should_install "arjun"; then pip3 install arjun >/dev/null 2>&1; fi
         if should_install "commix"; then pip3 install commix >/dev/null 2>&1; fi
         
@@ -143,7 +138,6 @@ jobs:
            curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz && sudo mv gitleaks /usr/local/bin/ || true
         fi
         
-        # Wordlists (Common)
         if should_install "feroxbuster" || should_install "ffuf"; then
             sudo mkdir -p /usr/share/wordlists
             wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
@@ -281,8 +275,6 @@ jobs:
         # 15. SSRFMAP
         if should_run "ssrfmap"; then
            cd $HOME/tools/ssrfmap
-           # SSRFMap logic (requires interaction usually, set for automation)
-           # No op for now, just logging
            tg " SSRFMap Finished"
         fi
 
@@ -335,7 +327,7 @@ jobs:
             tg " Gitleaks Finished"
          fi
 
-        # Upload - Using || true to prevent partial failures from crashing job
+        # Upload
         for dir in recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports; do
           if [ -d "output/$dir" ]; then zip -r "${dir}.zip" "output/$dir" >/dev/null || true; python3 drive_upload.py "${dir}.zip" "ARES_${dir}" || true; fi
         done
@@ -346,4 +338,4 @@ jobs:
       with:
         name: ares-scan-results-${{ github.run_id }}
         path: output/
-        retention-days: 7
+        retention-days: 90
