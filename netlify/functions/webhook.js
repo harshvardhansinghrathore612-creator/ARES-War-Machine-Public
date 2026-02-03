@@ -1,8 +1,8 @@
 const https = require('https');
 
+// Keep global session (best effort for stateless)
 const SESSIONS = {};
 
-// ALL 22 TOOLS RESTORED
 const TOOLS = [
   { id: 'subfinder', name: 'Subfinder', cat: 'Recon', out: 'subs' },
   { id: 'amass', name: 'Amass', cat: 'Recon', out: 'subs' },
@@ -46,15 +46,12 @@ const tg = (m, d) => req('POST', 'api.telegram.org', `/bot${TG_TOKEN}/${m}`, d);
 async function triggerWorkflow(scanType, target, prevId) {
   const inputs = { scan_type: scanType, target: target };
   if (prevId) inputs.previous_run_id = prevId.toString();
-  
-  const res = await req('POST', 'api.github.com', `/repos/${GH_REPO}/actions/workflows/ares.yml/dispatches`, 
-    { ref: 'main', inputs }, 
-    { 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' });
+  const res = await req('POST', 'api.github.com', `/repos/${GH_REPO}/actions/workflows/ares.yml/dispatches`, { ref: 'main', inputs }, { 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' });
   return res && (res.status === 204 || res.statusCode === 204);
 }
 
 async function getArtifacts() {
-  return req('GET', 'api.github.com', `/repos/${GH_REPO}/actions/artifacts?per_page=30`, null, { 'Authorization': `token ${GH_TOKEN}` });
+  return req('GET', 'api.github.com', `/repos/${GH_REPO}/actions/artifacts?per_page=20`, null, { 'Authorization': `token ${GH_TOKEN}` });
 }
 
 async function deleteArtifact(id) {
@@ -72,9 +69,6 @@ exports.handler = async (event) => {
     const data = update.callback_query?.data;
 
     if (!chatId) return { statusCode: 200, body: 'OK' };
-    
-    // DEBUG: Log activity to user if error occurs? No, just keep simple.
-    
     if (update.callback_query) await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id });
 
     if (!SESSIONS[chatId]) SESSIONS[chatId] = { step: 'MENU', selected: [], configs: [] };
@@ -83,10 +77,10 @@ exports.handler = async (event) => {
     // --- MENU ---
     if (text === '/start' || data === 'menu') {
       sess.step = 'MENU'; sess.selected = []; sess.configs = [];
-      await tg('sendMessage', { chat_id: chatId, text: ' *ARES Scanner*\n\nAll Tools Ready.', parse_mode: 'Markdown',
+      await tg('sendMessage', { chat_id: chatId, text: ' *ARES Scanner*\n\nSystem Online.', parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: [
-          [{ text: ' Custom / Chain Scan', callback_data: 'custom_setup' }],
-          [{ text: ' Full Scan (All 22)', callback_data: 'full_start' }],
+          [{ text: ' Custom Scan', callback_data: 'custom_setup' }],
+          [{ text: ' Full Scan', callback_data: 'full_start' }],
           [{ text: ' Data', callback_data: 'delete_menu' }]
         ]} 
       });
@@ -124,34 +118,40 @@ exports.handler = async (event) => {
 
     // --- WIZARD HELPER ---
     async function showWizardStep(cId, mId, idx) {
-        const t = TOOLS.find(x => x.id === sess.selected[idx]);
+        if (!sess.selected || sess.selected.length === 0) {
+            return tg('editMessageText', { chat_id: cId, message_id: mId, text: ' Session expired. Please Select Tools again.', reply_markup: { inline_keyboard: [[{text:'Back',callback_data:'custom_setup'}]] } });
+        }
+        const tId = sess.selected[idx];
+        const t = TOOLS.find(x => x.id === tId);
+        if (!t) return tg('sendMessage', { chat_id: cId, text: 'Error finding tool.' });
+
         const kb = [];
         let txt = ` *${t.name}*`;
-        
-        // Previous Scan Logic
         if (t.in) {
            txt += `\nNeeds: *${t.in}*`;
            const list = await getArtifacts().catch(()=>({}));
            if (list.artifacts && list.artifacts.length > 0) {
-              kb.push([{ text: ' Use Output from Recent Scan ', callback_data: 'dummy' }]);
-              list.artifacts.slice(0, 8).forEach(r => {
+              kb.push([{ text: ' Use Recent Output ', callback_data: 'dummy' }]);
+              list.artifacts.slice(0, 6).forEach(r => {
                  if (r.workflow_run?.id) {
-                     // Clean up time: "2024-..."
-                     const name = r.name.replace('ares-scan-results-', 'Run ');
-                     kb.push([{ text: ` ${name}`, callback_data: `use_run:${r.workflow_run.id}` }]);
+                     const size = (r.size_in_bytes/1024).toFixed(0);
+                     kb.push([{ text: ` ${r.name} (${size}KB)`, callback_data: `use_run:${r.workflow_run.id}` }]);
                  }
               });
            }
         }
-        
         if (idx > 0) kb.push([{ text: `Use Previous Target`, callback_data: 'use_prev' }]);
 
-        txt += `\n Enter Target OR select option:`;
+        txt += `\n Enter Target OR option:`;
         await tg(mId ? 'editMessageText' : 'sendMessage', { chat_id: cId, message_id: mId, text: txt, parse_mode: 'Markdown', reply_markup: { inline_keyboard: kb } });
     }
 
+    // --- CONFIG START ---
     if (data === 'config_start') {
-      if (sess.selected.length === 0) return tg('sendMessage', { chat_id: chatId, text: 'Select tools!' });
+      if (!sess.selected || sess.selected.length === 0) {
+          // SAFETY GUARD: If session died, warn user instead of crashing
+          return tg('editMessageText', { chat_id: chatId, message_id: msgId, text: ' Session expired (Stateless). Please Select Tools again.', reply_markup: { inline_keyboard: [[{text:'Back',callback_data:'custom_setup'}]] } });
+      }
       sess.step = 'CONFIG'; sess.configIdx = 0; sess.configs = [];
       await showWizardStep(chatId, msgId, 0);
       return { statusCode: 200, body: 'OK' };
@@ -159,17 +159,23 @@ exports.handler = async (event) => {
 
     // --- CONFIG INPUT ---
     if (sess.step === 'CONFIG' && (text || data?.startsWith('use_'))) {
+      if (!sess.selected || sess.configIdx >= sess.selected.length) return tg('sendMessage', { chat_id: chatId, text: 'Session error. /start' });
+      
       const tId = sess.selected[sess.configIdx];
       let target = text;
       let runId = null;
 
       if (data === 'use_prev') {
-          target = sess.configs[sess.configIdx-1].target;
-          runId = sess.configs[sess.configIdx-1].runId;
+          if (sess.configs.length > 0) {
+            target = sess.configs[sess.configIdx-1].target;
+            runId = sess.configs[sess.configIdx-1].runId;
+          } else {
+            return tg('sendMessage', { chat_id: chatId, text: 'No previous config.' });
+          }
       } 
       else if (data?.startsWith('use_run:')) {
           runId = data.split(':')[1];
-          target = `RUN_${runId}`; // Placeholder
+          target = `RUN_${runId}`; 
       }
 
       sess.configs.push({ tools: [tId], target, runId });
@@ -194,40 +200,37 @@ exports.handler = async (event) => {
     // --- LAUNCH ---
     if (data === 'launch') {
       sess.step = 'MENU';
-      let res = ' *Scans Triggered:*\n\n';
+      let res = ' *Launching:*\n\n';
       for (const c of sess.configs) {
          const t = c.tools[0];
          const ok = await triggerWorkflow(t, c.target, c.runId);
-         res += ok ? ` ${TOOLS.find(x=>x.id===t).name}\n` : ` ${t} (Fail)\n`;
+         res += ok ? ` ${TOOLS.find(x=>x.id===t).name}\n` : ` ${t} (Failed)\n`;
       }
-      await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: res, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: 'Menu', callback_data: 'menu' }]] } });
+      await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: res, parse_mode:'Markdown', reply_markup: { inline_keyboard: [[{ text: 'Menu', callback_data: 'menu' }]] } });
       return { statusCode: 200, body: 'OK' };
     }
-
-    // --- DELETE / OTHER ---
+    
+    // --- DELETE / FULL ---
     if (data === 'delete_menu') {
        const list = await getArtifacts().catch(()=>({}));
        const kb = [];
-       if (list.artifacts) list.artifacts.slice(0,8).forEach(a=>kb.push([{text:` ${a.name}`,callback_data:`del:${a.id}`}]));
+       if(list.artifacts) list.artifacts.slice(0,8).forEach(a=>kb.push([{text:` ${a.name}`,callback_data:`del:${a.id}`}]));
        kb.push([{text:'Back',callback_data:'menu'}]);
-       await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Trash:', reply_markup: { inline_keyboard: kb } });
+       await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Delete:', reply_markup: { inline_keyboard: kb } });
     }
-    if (data?.startsWith('del:')) {
-       await deleteArtifact(data.split(':')[1]);
-       await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id, text: 'Deleted' });
-    }
-    if (data === 'full_start') { sess.step = 'FULL_TARGET'; await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Target:' }); }
+    if (data?.startsWith('del:')) { await deleteArtifact(data.split(':')[1]); await tg('answerCallbackQuery', { callback_query_id: update.callback_query.id, text: 'Deleted' }); }
+
+    if (data === 'full_start') { sess.step = 'FULL_TARGET'; await tg('editMessageText', { chat_id: chatId, message_id: msgId, text: 'Enter Target:' }); }
     if (sess.step === 'FULL_TARGET' && text) { await triggerWorkflow('all', text); sess.step = 'MENU'; await tg('sendMessage', { chat_id: chatId, text: 'Started', reply_markup:{inline_keyboard:[[{text:'Menu',callback_data:'menu'}]]} }); }
 
     return { statusCode: 200, body: 'OK' };
   } catch (e) {
     console.error(e);
-    // EMERGENCY REPORT
-    try {
-        const update = JSON.parse(event.body);
-        const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-        if (chatId) await tg('sendMessage', { chat_id: chatId, text: ` Error: ${e.message}`, parse_mode: 'HTML' });
-    } catch(err) {} 
+    // Try to report error
+    try { 
+      const chat = JSON.parse(event.body).message?.chat?.id || JSON.parse(event.body).callback_query?.message?.chat?.id;
+      if(chat) await tg('sendMessage', {chat_id:chat, text:` Crash: ${e.message}`});
+    } catch(err){}
     return { statusCode: 200, body: 'OK' };
   }
 };
