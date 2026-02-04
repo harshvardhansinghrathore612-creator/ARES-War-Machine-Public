@@ -411,21 +411,30 @@ jobs:
         ###########################################
         if should_run "sqlmap"; then
           echo ""; echo "=== ---- SQLMAP ==="
-          mkdir -p output/sql/sqlmap
+          # SQLMAP: Clean Output Logic
           if [[ "$TGT" == *"?"* ]]; then
+            echo "SQLMap: Scanning $TGT"
+            # Run silently, save full log
+            mkdir -p output/sql/logs
             timeout 900 python3 $HOME/tools/sqlmap/sqlmap.py -u "$TGT" --batch --risk 2 --level 3 \
-              --threads 5 --output-dir=output/sql/sqlmap 2>&1 | tee output/sql/sqlmap_log.txt || true
-            # SQLMap output is in output/sql/sqlmap, but we want a single file for upload
-            find output/sql/sqlmap -type f -name "*.txt" -exec cat {} + > output/sql/sqlmap.txt || true
+              --threads 5 --output-dir=output/sql/logs > output/sql/logs/full_log.txt 2>&1 || true
+            
+            # Extract Findings Only
+            grep -B 1 -A 10 "Parameter:" output/sql/logs/full_log.txt > output/sql/sqlmap.txt || echo "No vulnerabilities found" > output/sql/sqlmap.txt
+            
           elif [ -s output/crawl/param_urls.txt ]; then
+            echo "SQLMap: Scanning params"
+            mkdir -p output/sql/logs # Ensure log directory exists for param scans too
             head -15 output/crawl/param_urls.txt | while read url; do
               timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 \
-                --threads 3 >> output/sql/sqlmap.txt 2>&1 | tee -a output/sql/sqlmap_log.txt || true
+                --threads 3 >> output/sql/logs/full_log.txt 2>&1 || true
             done
+            # Extract Findings
+             grep -B 1 -A 10 "Parameter:" output/sql/logs/full_log.txt > output/sql/sqlmap.txt || echo "No vulnerabilities found" > output/sql/sqlmap.txt
           else
             echo "[!] SQLMap needs parameterized URLs"
           fi
-          tg "--- SQLMap complete"
+          tg "✅ SQLMap Scan Complete"
           upload_tool_results "sqlmap"
         fi
 
