@@ -47,11 +47,31 @@ jobs:
     - name: Restore Previous
       if: inputs.previous_run_id != ''
       run: |
-        gh run download ${{ inputs.previous_run_id }} -D prev || true
-        find prev -name "all_subs.txt" -exec cp {} output/recon/ \; 2>/dev/null || true
-        find prev -name "live.txt" -exec cp {} output/probe/ \; 2>/dev/null || true
-        find prev -name "param_urls.txt" -exec cp {} output/crawl/ \; 2>/dev/null || true
-        echo "Restored previous data"
+        # Support multiple Run IDs (comma separated)
+        IDS=$(echo "${{ inputs.previous_run_id }}" | tr ',' ' ')
+        for id in $IDS; do
+          echo "Restoring Run ID: $id"
+          mkdir -p "prev_$id"
+          gh run download "$id" -D "prev_$id" || true
+          
+          # Merge All Subs
+          find "prev_$id" -name "all_subs.txt" -exec cat {} >> output/recon/all_subs.txt \; 2>/dev/null || true
+          
+          # Merge Live URLs
+          find "prev_$id" -name "live.txt" -exec cat {} >> output/probe/live.txt \; 2>/dev/null || true
+          
+          # Merge Param URLs
+          find "prev_$id" -name "param_urls.txt" -exec cat {} >> output/crawl/param_urls.txt \; 2>/dev/null || true
+        done
+        
+        # Deduplicate merged lists
+        [ -s output/recon/all_subs.txt ] && sort -u output/recon/all_subs.txt -o output/recon/all_subs.txt || true
+        [ -s output/probe/live.txt ] && sort -u output/probe/live.txt -o output/probe/live.txt || true
+        [ -s output/crawl/param_urls.txt ] && sort -u output/crawl/param_urls.txt -o output/crawl/param_urls.txt || true
+        
+        echo "Restoration Complete. Merged counts:"
+        wc -l output/recon/all_subs.txt 2>/dev/null || echo "0 subs"
+        wc -l output/probe/live.txt 2>/dev/null || echo "0 live"
 
     - name: Install Deps
       run: |
@@ -197,10 +217,13 @@ jobs:
             ;;
             
           # === VULN ===
-          nuclei)
             if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt; else IN=targets_urls.txt; fi
-            nuclei -update-templates -silent >/dev/null 2>&1 || true
-            nuclei -l "$IN" -tags cve,misconfig,dast,sqli,xss,tech,vulnerability,rce,lfi,ssrf,redirect,exposure -severity medium,high,critical -silent -o output/vulns/nuclei.txt
+            nuclei -update-templates >/dev/null 2>&1 || true
+            
+            # Show command and run without silent mode (Kali style)
+            echo "COMMAND: nuclei -l $IN -tags cve,misconfig,dast,sqli,xss,tech,vulnerability,rce,lfi,ssrf,redirect,exposure -severity medium,high,critical -o output/vulns/nuclei.txt"
+            nuclei -l "$IN" -tags cve,misconfig,dast,sqli,xss,tech,vulnerability,rce,lfi,ssrf,redirect,exposure -severity medium,high,critical -o output/vulns/nuclei.txt
+            
             tg "Nuclei: $(wc -l < output/vulns/nuclei.txt) vulns"
             up output/vulns/nuclei.txt
             ;;
