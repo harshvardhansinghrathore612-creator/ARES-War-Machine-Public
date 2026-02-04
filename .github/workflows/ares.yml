@@ -174,9 +174,18 @@ jobs:
             
           # === CRAWL ===
           paramspider)
-            # FIXED: Simple paramspider
-            paramspider -d "$DOM" 2>&1 | tee output/crawl/paramspider.log || true
-            find results/ -name "*.txt" -exec cat {} \; 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt || echo "" > output/crawl/param_urls.txt
+            # Loop through live URLs or use single domain
+            if [ -s output/probe/live.txt ]; then
+              cat output/probe/live.txt | while read url; do
+                d=$(echo "$url" | sed 's|https\?://||;s|/.*||')
+                echo "ParamSpider: $d"
+                paramspider -d "$d" 2>/dev/null || true
+              done
+            else
+              echo "ParamSpider: $DOM"
+              paramspider -d "$DOM" 2>/dev/null || true
+            fi
+            find results/ -name "*.txt" -exec cat {} \; 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt
             tg "ParamSpider: $(wc -l <output/crawl/param_urls.txt) URLs"
             up output/crawl/param_urls.txt
             ;;
