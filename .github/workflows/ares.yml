@@ -145,6 +145,7 @@ jobs:
         TGT="$TARGET"
         STGT="$SAFE_TARGET"
         DOM=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
+        echo "DOM=$DOM" >> $GITHUB_ENV
         
         echo "$TGT" | tr ',' '\n' > targets.txt
         # Ensure targets have https for tools that need it
@@ -447,6 +448,6 @@ jobs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: ${{ env.TOOL }}-${{ github.run_id }}
+        name: ${{ env.TOOL }}-${{ github.run_id }}_${{ env.DOM }}
         path: output/
         retention-days: 90
