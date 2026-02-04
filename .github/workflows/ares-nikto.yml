@@ -1,0 +1,27 @@
+name: ARES - Nikto Scanner
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        required: true
+      previous_run_id:
+        required: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - run: sudo apt-get update && sudo apt-get install -y nikto
+    - run: pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+    - name: Run Nikto
+      run: |
+        timeout 600 nikto -h "${{ github.event.inputs.target }}" -Tuning 123bde -maxtime 300 > output/vulns/nikto.txt 2>&1 || true
+    - run: python3 drive_upload.py "nikto" "output/vulns/nikto.txt"
+      env:
+        GOOGLE_CLIENT_EMAIL: ${{ secrets.GOOGLE_CLIENT_EMAIL }}
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+        GOOGLE_PRIVATE_KEY_ID: ${{ secrets.GOOGLE_PRIVATE_KEY_ID }}
+        GOOGLE_PROJECT_ID: ${{ secrets.GOOGLE_PROJECT_ID }}
+        GOOGLE_CLIENT_X509_CERT_URL: ${{ secrets.GOOGLE_CLIENT_X509_CERT_URL }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
