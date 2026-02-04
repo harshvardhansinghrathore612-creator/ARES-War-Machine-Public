@@ -194,23 +194,25 @@ jobs:
             
           # === VULN ===
           nuclei)
-            # Loop through live URLs or use single target
             if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt; else echo "https://$DOM" > targets.txt; IN=targets.txt; fi
             nuclei -update-templates -silent >/dev/null 2>&1 || true
-            nuclei -l "$IN" -tags cve,misconfig,dast,sqli,xss -severity low,medium,high,critical -silent -o output/vulns/nuclei.txt
+            nuclei -l "$IN" -tags cve,misconfig,dast,sqli,xss,tech,vulnerability,rce,lfi,ssrf,redirect,exposure -severity medium,high,critical -silent -o output/vulns/nuclei.txt
             tg "Nuclei: $(wc -l < output/vulns/nuclei.txt) vulns"
             up output/vulns/nuclei.txt
             ;;
             
           nikto)
-            # Loop through live URLs
+            echo "Checking for live.txt..."
+            ls -la output/probe/ || true
             if [ -s output/probe/live.txt ]; then
+              echo "Found live.txt with $(wc -l < output/probe/live.txt) URLs"
               cat output/probe/live.txt | while read url; do
-                echo "Nikto: $url"
+                echo "Nikto scanning: $url"
                 nikto -h "$url" -Tuning 123bde >> output/vulns/nikto.txt 2>&1 || true
               done
             else
               URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
+              echo "No live.txt, scanning single: $URL"
               nikto -h "$URL" -Tuning 123bde > output/vulns/nikto.txt 2>&1 || true
             fi
             tg "Nikto done"
