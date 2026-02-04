@@ -1,4 +1,4 @@
-name: ARES â€“ Multi-Tool Vulnerability Scanner
+name: ARES - Multi-Tool Vulnerability Scanner
 
 on:
   workflow_dispatch:
@@ -573,3 +573,4 @@ jobs:
       run: |
         rm -rf output/ *.zip drive_upload.py 2>/dev/null || true
         rm -rf $HOME/tools/ $HOME/SecLists/ 2>/dev/null || true
+
