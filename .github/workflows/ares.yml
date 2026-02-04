@@ -126,76 +126,8 @@ jobs:
         git clone --depth 1 https://github.com/danielmiessler/SecLists.git $HOME/SecLists
         sudo ln -sf $HOME/SecLists/Discovery/Web-Content/common.txt /usr/share/wordlists/common.txt
 
-    - name: Create Drive Uploader
+    - name: Install Python Dependencies
       run: |
-        cat << 'PYEOF' > drive_upload.py
-        import os, sys
-        try:
-            from google.oauth2.credentials import Credentials
-            from googleapiclient.discovery import build
-            from googleapiclient.http import MediaFileUpload
-            required = ["GOOGLE_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GDRIVE_FOLDER_ID"]
-            if any(not os.environ.get(v) for v in required):
-                print("SKIP: Drive credentials missing"); sys.exit(0)
-            creds = Credentials(None, refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=os.environ["GOOGLE_CLIENT_ID"],
-                client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
-            service = build("drive","v3",credentials=creds)
-
-            tool_name = sys.argv[1] # e.g., "subfinder"
-            
-            # Create/get the parent folder for this tool's results
-            q_tool_folder = f"name='ARES_{tool_name}' and '{os.environ['GDRIVE_FOLDER_ID']}' in parents and mimeType='application/vnd.google-apps.folder'"
-            res_tool_folder = service.files().list(q=q_tool_folder).execute().get("files",[])
-            if res_tool_folder:
-                tool_id = res_tool_folder[0]["id"]
-            else:
-                tool_id = service.files().create(
-                    body={"name":f"ARES_{tool_name}","mimeType":"application/vnd.google-apps.folder",
-                    "parents":[os.environ["GDRIVE_FOLDER_ID"]]},fields="id").execute()["id"]
-
-            # Files to upload
-            tool_files = {
-                "subfinder": ["output/recon/subfinder.txt", "output/recon/all_subs.txt"],
-                "httpx": ["output/probe/httpx.txt", "output/probe/live.txt"],
-                "paramspider": ["output/crawl/param_urls.txt"],
-                "nuclei": ["output/vulns/nuclei.txt"],
-                "sqlmap": ["output/sql/sqlmap.txt"],
-                "dalfox": ["output/xss/dalfox.txt"],
-                "naabu": ["output/ports/naabu.txt"],
-                "nikto": ["output/vulns/nikto.txt"],
-                "ffuf": ["output/vulns/ffuf.json"],
-                "crlfuzz": ["output/crlf/crlfuzz.txt"],
-                "subzy": ["output/takeover/subzy.txt"],
-                "gitleaks": ["output/secrets/gitleaks.txt"],
-                "amass": ["output/recon/amass.txt"],
-                "arjun": ["output/crawl/arjun.txt"],
-                "feroxbuster": ["output/vulns/feroxbuster.txt"],
-                "xsstrike": ["output/xss/xsstrike.txt"],
-                "ghauri": ["output/sql/ghauri.txt"],
-                "ssrfmap": ["output/ssrf/ssrfmap.txt"],
-                "lfimap": ["output/lfi/lfimap.txt"],
-                "openredirex": ["output/redirect/openredirex.txt"],
-                "commix": ["output/cmdi/commix.txt"],
-                "tplmap": ["output/ssti/tplmap.txt"],
-            }
-            
-            for filepath in tool_files.get(tool_name, []):
-                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                    filename = os.path.basename(filepath)
-                    media = MediaFileUpload(filepath, resumable=True)
-                    existing = service.files().list(q=f"name='{filename}' and '{tool_id}' in parents and trashed=false", fields="files(id)").execute().get("files", [])
-                    if existing:
-                        service.files().update(fileId=existing[0]["id"], media_body=media).execute()
-                        print(f"Updated: {filename}")
-                    else:
-                        service.files().create(body={"name": filename, "parents": [tool_id]}, media_body=media).execute()
-                        print(f"Uploaded: {filename}")
-                else:
-                    print(f"Skipping empty or non-existent file: {filepath}")
-        except Exception as e: print(f"Upload error: {e}")
-        PYEOF
         pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
     - name: Run ARES Scanner
@@ -234,24 +166,25 @@ jobs:
           return 1
         }
 
-        # Function to upload results for a specific tool
+        # Function to upload results for a specific tool using the new script
         upload_tool_results() {
           local tool_name=$1
-          echo "Uploading results for $tool_name..."
-          python3 drive_upload.py "$tool_name" 2>/dev/null || true
+          local log_file=$2
+          echo "Processing results for $tool_name..."
+          python3 process_results.py "$tool_name" "$log_file" 2>/dev/null || true
         }
 
         ###########################################
         # SUBFINDER - Subdomain Enumeration
         ###########################################
         if should_run "subfinder"; then
-          echo ""; echo "=== ---- SUBFINDER ==="
+          echo ""; echo "=== 🔍 SUBFINDER ==="
           subfinder -d $DOMAIN -all -o output/recon/subfinder.txt 2>&1 | tee output/recon/subfinder_log.txt || true
           assetfinder --subs-only $DOMAIN >> output/recon/subs.txt 2>&1 || true
           cat output/recon/*.txt 2>/dev/null | sort -u > output/recon/all_subs.txt
           echo "[+] Subdomains: $(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0)"
-          tg "--- Subfinder: $(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0) subdomains"
-          upload_tool_results "subfinder"
+          tg "✅ Subfinder: $(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0) subdomains"
+          upload_tool_results "subfinder" "output/recon/subfinder.txt"
         fi
 
         ###########################################
@@ -327,12 +260,15 @@ jobs:
           cat "$INPUT"
           echo "---"
           # UNLIMITED MODE + SEVERITY FILTER (As requested)
+          # We save full output to log.txt for processing
           nuclei -l "$INPUT" -severity low,medium,high,critical \
-            -c 50 -timeout 10 -o output/vulns/nuclei.txt 2>&1 | tee output/vulns/nuclei_log.txt || true
-          COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
-          echo "RESULT: $COUNT vulnerabilities"
-          tg "--- Nuclei: $COUNT vulns"
-          upload_tool_results "nuclei"
+            -c 50 -timeout 10 -o output/vulns/nuclei_raw.txt 2>&1 | tee output/vulns/nuclei_log.txt || true
+          
+          # Process log for clean findings
+          upload_tool_results "nuclei" "output/vulns/nuclei_log.txt"
+          
+          COUNT=$(wc -l < output/vulns/nuclei_clean.txt 2>/dev/null || echo 0)
+          tg "✅ Nuclei: $COUNT vulns"
         fi
 
         ###########################################
@@ -376,14 +312,14 @@ jobs:
         if should_run "dalfox"; then
           echo ""; echo "=== ---- DALFOX (XSS) ==="
           if [ -s output/crawl/param_urls.txt ]; then
-            dalfox file output/crawl/param_urls.txt --silence -o output/xss/dalfox.txt 2>&1 | tee output/xss/dalfox_log.txt || true
+            dalfox file output/crawl/param_urls.txt --skip-mining-all --silence > output/xss/dalfox_log.txt 2>&1 || true
           elif [[ "$TGT" == *"?"* ]]; then
-            echo "$TGT" | dalfox pipe --silence -o output/xss/dalfox.txt 2>&1 | tee output/xss/dalfox_log.txt || true
+            echo "$TGT" | dalfox pipe --skip-mining-all --silence > output/xss/dalfox_log.txt 2>&1 || true
           else
-            echo "[!] No param URLs for Dalfox"
+            echo "[!] No param URLs for Dalfox" > output/xss/dalfox_log.txt
           fi
-          tg "--- Dalfox: $(wc -l < output/xss/dalfox.txt 2>/dev/null || echo 0) XSS"
-          upload_tool_results "dalfox"
+          upload_tool_results "dalfox" "output/xss/dalfox_log.txt"
+          tg "✅ Dalfox done"
         fi
 
         ###########################################
@@ -410,32 +346,28 @@ jobs:
         # SQLMAP - SQL Injection
         ###########################################
         if should_run "sqlmap"; then
-          echo ""; echo "=== ---- SQLMAP ==="
-          # SQLMAP: Clean Output Logic
+          echo ""; echo "=== 💾 SQLMAP ==="
+          mkdir -p output/sql/logs
+          
           if [[ "$TGT" == *"?"* ]]; then
-            echo "SQLMap: Scanning $TGT"
-            # Run silently, save full log
-            mkdir -p output/sql/logs
-            timeout 900 python3 $HOME/tools/sqlmap/sqlmap.py -u "$TGT" --batch --risk 2 --level 3 \
-              --threads 5 --output-dir=output/sql/logs > output/sql/logs/full_log.txt 2>&1 || true
-            
-            # Extract Findings Only
-            grep -B 1 -A 10 "Parameter:" output/sql/logs/full_log.txt > output/sql/sqlmap.txt || echo "No vulnerabilities found" > output/sql/sqlmap.txt
-            
+             echo "Scanning $TGT"
+             # Redirect output to LOG file
+             timeout 900 python3 $HOME/tools/sqlmap/sqlmap.py -u "$TGT" --batch --risk 2 --level 3 \
+               --threads 5 --output-dir=output/sql/logs > output/sql/sqlmap_log.txt 2>&1 || true
+          
           elif [ -s output/crawl/param_urls.txt ]; then
-            echo "SQLMap: Scanning params"
-            mkdir -p output/sql/logs # Ensure log directory exists for param scans too
-            head -15 output/crawl/param_urls.txt | while read url; do
-              timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 \
-                --threads 3 >> output/sql/logs/full_log.txt 2>&1 || true
-            done
-            # Extract Findings
-             grep -B 1 -A 10 "Parameter:" output/sql/logs/full_log.txt > output/sql/sqlmap.txt || echo "No vulnerabilities found" > output/sql/sqlmap.txt
+             echo "Scanning params"
+             head -20 output/crawl/param_urls.txt | while read url; do
+               timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 \
+                 --threads 3 >> output/sql/sqlmap_log.txt 2>&1 || true
+             done
           else
-            echo "[!] SQLMap needs parameterized URLs"
+             echo "No params for SQLMap" > output/sql/sqlmap_log.txt
           fi
+          
+          # Process the log to extract findings
+          upload_tool_results "sqlmap" "output/sql/sqlmap_log.txt"
           tg "✅ SQLMap Scan Complete"
-          upload_tool_results "sqlmap"
         fi
 
         ###########################################
