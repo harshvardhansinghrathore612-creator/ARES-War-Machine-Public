@@ -48,86 +48,56 @@ jobs:
         gh run download ${{ inputs.previous_run_id }} -D prev_data || true
         find prev_data -name "*.txt" | while read f; do
           base=$(basename "$f")
-          if [[ "$base" == "all_subs.txt" ]] || [[ "$base" == "subfinder.txt" ]] || [[ "$base" == "amass.txt" ]]; then
-            cp "$f" output/recon/
-          elif [[ "$base" == "live.txt" ]] || [[ "$base" == "httpx.txt" ]]; then
-            cp "$f" output/probe/
-          elif [[ "$base" == "param_urls.txt" ]] || [[ "$base" == "arjun.txt" ]]; then
-            cp "$f" output/crawl/
-          elif [[ "$base" == "naabu.txt" ]]; then
-            cp "$f" output/ports/
-          fi
+          if [[ "$base" == "all_subs.txt" ]] || [[ "$base" == "subfinder.txt" ]]; then cp "$f" output/recon/; fi
+          if [[ "$base" == "live.txt" ]] || [[ "$base" == "httpx.txt" ]]; then cp "$f" output/probe/; fi
+          if [[ "$base" == "param_urls.txt" ]]; then cp "$f" output/crawl/; fi
         done
         find output -name "*.txt" -exec wc -l {} \; 2>/dev/null || true
 
-    - name: Install Dependencies
+    - name: Install
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y -qq python3-pip curl wget git libpcap-dev nikto jq
         pip3 install -q google-api-python-client google-auth-httplib2 google-auth-oauthlib
-
-    - name: Install Tool
-      run: |
         T="${{ github.event.inputs.scan_type }}"
         echo "Installing: $T"
         case "$T" in
-          subfinder) 
-            go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-            go install github.com/tomnomnom/assetfinder@latest
-            ;;
+          subfinder) go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest; go install github.com/tomnomnom/assetfinder@latest ;;
           amass) go install github.com/owasp-amass/amass/v4/...@latest || true ;;
           httpx) go install github.com/projectdiscovery/httpx/cmd/httpx@latest ;;
           naabu) go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest ;;
-          nuclei) 
-            go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-            nuclei -update-templates 2>/dev/null || true
-            ;;
+          nuclei) go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest; nuclei -update-templates 2>/dev/null || true ;;
           dalfox) go install github.com/hahwul/dalfox/v2@latest ;;
-          ffuf) 
-            go install github.com/ffuf/ffuf/v2@latest
-            sudo mkdir -p /usr/share/wordlists
-            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
-            ;;
-          feroxbuster) 
-            curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash
-            sudo mv feroxbuster /usr/local/bin/ 2>/dev/null || true
-            sudo mkdir -p /usr/share/wordlists
-            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
-            ;;
+          ffuf) go install github.com/ffuf/ffuf/v2@latest; sudo mkdir -p /usr/share/wordlists; wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt ;;
+          feroxbuster) curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash; sudo mv feroxbuster /usr/local/bin/ || true; sudo mkdir -p /usr/share/wordlists; wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt ;;
           crlfuzz) go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest ;;
           subzy) go install github.com/PentestPad/subzy@latest ;;
-          paramspider) 
-            pip3 install git+https://github.com/devanshbatham/paramspider.git
-            paramspider --help || echo "Installed"
+          paramspider)
+            cd $HOME/tools
+            git clone https://github.com/devanshbatham/paramspider.git
+            cd paramspider
+            pip3 install .
+            echo "ParamSpider installed"
             ;;
           arjun) pip3 install arjun ;;
           sqlmap) git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap ;;
-          ghauri) pip3 install git+https://github.com/r0oth3x49/ghauri ;;
-          xsstrike) 
-            git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike
-            cd $HOME/tools/xsstrike && pip3 install -r requirements.txt
+          ghauri)
+            cd $HOME/tools
+            git clone https://github.com/r0oth3x49/ghauri.git
+            cd ghauri
+            pip3 install -r requirements.txt
+            pip3 install .
             ;;
-          ssrfmap) 
-            git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap
-            cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt
-            ;;
-          lfimap) 
-            git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap
-            cd $HOME/tools/lfimap && pip3 install -r requirements.txt
-            ;;
-          openredirex) pip3 install git+https://github.com/devanshbatham/OpenRedireX || pip3 install aiohttp ;;
+          xsstrike) git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike; cd $HOME/tools/xsstrike && pip3 install -r requirements.txt ;;
+          ssrfmap) git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap; cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt ;;
+          lfimap) git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap; cd $HOME/tools/lfimap && pip3 install -r requirements.txt ;;
+          openredirex) pip3 install aiohttp ;;
           commix) pip3 install commix ;;
-          tplmap) 
-            git clone https://github.com/epinna/tplmap $HOME/tools/tplmap
-            cd $HOME/tools/tplmap && pip3 install -r requirements.txt || true
-            ;;
-          gitleaks) 
-            curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz
-            sudo mv gitleaks /usr/local/bin/
-            ;;
+          tplmap) git clone https://github.com/epinna/tplmap $HOME/tools/tplmap; cd $HOME/tools/tplmap && pip3 install -r requirements.txt || true ;;
+          gitleaks) curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz; sudo mv gitleaks /usr/local/bin/ ;;
         esac
 
-    - name: Run Scan
+    - name: Scan
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -135,21 +105,16 @@ jobs:
         T="$TOOL"
         TGT="$TARGET"
         DOM=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
+        echo "$TGT" | tr ',' '\n' > targets.txt
         
-        echo "RUNNING: $T on $TGT"
+        tg() { [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" >/dev/null 2>&1 || true; }
         
+        tg " *$T* on \`$TGT\`"
+        
+        echo "=== RUNNING: $T on $TGT ==="
         [ -f output/recon/all_subs.txt ] && echo "all_subs.txt: $(wc -l < output/recon/all_subs.txt) lines"
         [ -f output/probe/live.txt ] && echo "live.txt: $(wc -l < output/probe/live.txt) lines"
         [ -f output/crawl/param_urls.txt ] && echo "param_urls.txt: $(wc -l < output/crawl/param_urls.txt) lines"
-        
-        echo "$TGT" | tr ',' '\n' > targets.txt
-        
-        tg() { 
-          [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
-            -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" >/dev/null 2>&1 || true
-        }
-        
-        tg " *$T* on \`$TGT\`"
         
         case "$T" in
           subfinder)
@@ -160,110 +125,40 @@ jobs:
             echo "RESULT: $COUNT subdomains"
             tg " Subfinder: $COUNT subdomains"
             ;;
-            
-          amass)
-            timeout 1800 amass enum -passive -d "$DOM" -o output/recon/amass.txt || true
-            tg " Amass done"
-            ;;
-            
           httpx)
-            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"
-            else echo "$TGT" | tr ',' '\n' > targets.txt; INPUT="targets.txt"; fi
+            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
+            echo "Using: $INPUT"
             httpx -l "$INPUT" -ports 80,443,8080,8443 -threads 50 -o output/probe/httpx.txt
             cat output/probe/httpx.txt | awk '{print $1}' > output/probe/live.txt
             COUNT=$(wc -l < output/probe/live.txt)
             echo "RESULT: $COUNT live hosts"
             tg " HTTPX: $COUNT live"
             ;;
-            
-          naabu)
-            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
-            naabu -l "$INPUT" -top-ports 100 -o output/ports/naabu.txt
-            tg " Naabu done"
-            ;;
-            
           paramspider)
-            # Get list of domains to scan
             if [ -s output/probe/live.txt ]; then
-              echo "Using live hosts"
-              cat output/probe/live.txt | sed 's|https\?://||;s|/.*||;s|:.*||' | sort -u > domains_to_scan.txt
+              cat output/probe/live.txt | sed 's|https\?://||;s|/.*||;s|:.*||' | sort -u > domains.txt
             elif [ -s output/recon/all_subs.txt ]; then
-              echo "Using subdomains"
-              cp output/recon/all_subs.txt domains_to_scan.txt
+              cp output/recon/all_subs.txt domains.txt
             else
-              echo "$DOM" > domains_to_scan.txt
+              echo "$DOM" > domains.txt
             fi
-            
-            echo "Scanning $(wc -l < domains_to_scan.txt) domains"
-            mkdir -p output/crawl
-            
-            cat domains_to_scan.txt | head -30 | while read domain; do
-              echo "ParamSpider: $domain"
-              paramspider -d "$domain" 2>&1 | tee -a output/crawl/ps_output.txt || true
+            echo "Scanning $(wc -l < domains.txt) domains"
+            cat domains.txt | head -30 | while read d; do
+              echo "ParamSpider: $d"
+              paramspider -d "$d" 2>&1 || true
             done
-            
-            # Collect results - paramspider outputs to results/<domain>.txt
             find . -path "./results/*.txt" -exec cat {} \; 2>/dev/null | grep -E "^https?://" | grep "=" | sort -u > output/crawl/param_urls.txt
             COUNT=$(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0)
             echo "RESULT: $COUNT parameter URLs"
             head -20 output/crawl/param_urls.txt
             tg " ParamSpider: $COUNT URLs"
             ;;
-            
-          arjun)
-            if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else echo "https://$DOM" > targets.txt; INPUT="targets.txt"; fi
-            head -20 "$INPUT" | while read url; do arjun -u "$url" -oT output/crawl/arjun.txt 2>&1 || true; done
-            tg " Arjun done"
-            ;;
-            
           nuclei)
             if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else echo "https://$TGT" > targets.txt; INPUT="targets.txt"; fi
             nuclei -l "$INPUT" -severity medium,high,critical -o output/vulns/nuclei.txt
             COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
             tg " Nuclei: $COUNT vulns"
             ;;
-            
-          nikto)
-            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
-            timeout 600 nikto -h "$URL" -Tuning 123bde > output/vulns/nikto.txt 2>&1 || true
-            tg " Nikto done"
-            ;;
-            
-          ffuf)
-            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
-            ffuf -u "${URL}/FUZZ" -w /usr/share/wordlists/common.txt -mc 200,301,302,403 -o output/vulns/ffuf.json 2>&1 || true
-            tg " FFUF done"
-            ;;
-            
-          feroxbuster)
-            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
-            timeout 900 feroxbuster -u "$URL" -w /usr/share/wordlists/common.txt -o output/vulns/feroxbuster.txt 2>&1 || true
-            tg " Feroxbuster done"
-            ;;
-            
-          dalfox)
-            if [[ "$TGT" == *"="* ]]; then
-              echo "$TGT" | tr ',' '\n' | dalfox pipe -o output/xss/dalfox.txt
-            elif [ -s output/crawl/param_urls.txt ]; then
-              head -50 output/crawl/param_urls.txt | dalfox pipe -o output/xss/dalfox.txt
-            else
-              tg " Dalfox: No param URLs"
-            fi
-            tg " Dalfox done"
-            ;;
-            
-          xsstrike)
-            if [[ "$TGT" == *"="* ]]; then
-              cd $HOME/tools/xsstrike && timeout 600 python3 xsstrike.py -u "$TGT" --crawl -l 2 > $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
-            elif [ -s output/crawl/param_urls.txt ]; then
-              head -10 output/crawl/param_urls.txt | while read url; do
-                cd $HOME/tools/xsstrike && timeout 120 python3 xsstrike.py -u "$url" >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
-              done
-            fi
-            cd $GITHUB_WORKSPACE
-            tg " XSStrike done"
-            ;;
-            
           sqlmap)
             if [[ "$TGT" == *"="* ]]; then
               echo "$TGT" | tr ',' '\n' | while read url; do
@@ -271,99 +166,40 @@ jobs:
               done
             elif [ -s output/crawl/param_urls.txt ]; then
               head -15 output/crawl/param_urls.txt | while read url; do
+                echo "Testing: $url"
                 timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
               done
             fi
             tg " SQLMap done"
             ;;
-            
-          ghauri)
+          dalfox)
             if [[ "$TGT" == *"="* ]]; then
-              timeout 600 ghauri -u "$TGT" --batch > output/sql/ghauri.txt 2>&1 || true
+              echo "$TGT" | tr ',' '\n' | dalfox pipe -o output/xss/dalfox.txt
             elif [ -s output/crawl/param_urls.txt ]; then
-              head -10 output/crawl/param_urls.txt | while read url; do
-                timeout 120 ghauri -u "$url" --batch >> output/sql/ghauri.txt 2>&1 || true
-              done
+              head -50 output/crawl/param_urls.txt | dalfox pipe -o output/xss/dalfox.txt
             fi
-            tg " Ghauri done"
+            tg " Dalfox done"
             ;;
-            
-          ssrfmap)
-            if [[ "$TGT" == *"="* ]]; then
-              PARAM=$(echo "$TGT" | grep -oP '\?\K[^=]+' | head -1)
-              HOST=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
-              printf "GET %s HTTP/1.1\nHost: %s\n\n" "$TGT" "$HOST" > /tmp/req.txt
-              cd $HOME/tools/ssrfmap && timeout 300 python3 ssrfmap.py -r /tmp/req.txt -p "$PARAM" -m readfiles > $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt 2>&1 || true
-              cd $GITHUB_WORKSPACE
-            fi
-            tg " SSRFMap done"
+          naabu)
+            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
+            naabu -l "$INPUT" -top-ports 100 -o output/ports/naabu.txt
+            tg " Naabu done"
             ;;
-            
-          lfimap)
-            if [[ "$TGT" == *"="* ]]; then
-              cd $HOME/tools/lfimap && timeout 600 python3 lfimap.py -U "$TGT" > $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
-            elif [ -s output/crawl/param_urls.txt ]; then
-              head -10 output/crawl/param_urls.txt | while read url; do
-                cd $HOME/tools/lfimap && timeout 120 python3 lfimap.py -U "$url" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
-              done
-            fi
-            cd $GITHUB_WORKSPACE
-            tg " LFIMap done"
+          nikto)
+            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
+            timeout 600 nikto -h "$URL" -Tuning 123bde > output/vulns/nikto.txt 2>&1 || true
+            tg " Nikto done"
             ;;
-            
-          openredirex)
-            if [ -s output/crawl/param_urls.txt ]; then
-              python3 -c "
-import sys
-for line in sys.stdin:
-    url = line.strip()
-    if '=' in url:
-        print(url.replace(url.split('=')[-1], 'http://evil.com'))
-" < output/crawl/param_urls.txt > output/redirect/openredirex.txt 2>&1 || true
-            fi
-            tg " OpenRedireX done"
+          ffuf)
+            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
+            ffuf -u "${URL}/FUZZ" -w /usr/share/wordlists/common.txt -mc 200,301,302,403 -o output/vulns/ffuf.json 2>&1 || true
+            tg " FFUF done"
             ;;
-            
           crlfuzz)
             URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
             echo "$URL" | crlfuzz -o output/crlf/crlfuzz.txt
             tg " CRLFuzz done"
             ;;
-            
-          commix)
-            if [[ "$TGT" == *"="* ]]; then
-              timeout 600 commix -u "$TGT" --batch > output/cmdi/commix.txt 2>&1 || true
-            elif [ -s output/crawl/param_urls.txt ]; then
-              head -10 output/crawl/param_urls.txt | while read url; do
-                timeout 120 commix -u "$url" --batch >> output/cmdi/commix.txt 2>&1 || true
-              done
-            fi
-            tg " Commix done"
-            ;;
-            
-          tplmap)
-            if [[ "$TGT" == *"="* ]]; then
-              cd $HOME/tools/tplmap && timeout 600 python3 tplmap.py -u "$TGT" > $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
-            elif [ -s output/crawl/param_urls.txt ]; then
-              head -10 output/crawl/param_urls.txt | while read url; do
-                cd $HOME/tools/tplmap && timeout 120 python3 tplmap.py -u "$url" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
-              done
-            fi
-            cd $GITHUB_WORKSPACE
-            tg " Tplmap done"
-            ;;
-            
-          subzy)
-            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
-            subzy run --targets "$INPUT" --hide_fails --output output/takeover/subzy.txt
-            tg " Subzy done"
-            ;;
-            
-          gitleaks)
-            gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>&1 || true
-            tg " Gitleaks done"
-            ;;
-            
           *) tg " Unknown: $T" ;;
         esac
         
