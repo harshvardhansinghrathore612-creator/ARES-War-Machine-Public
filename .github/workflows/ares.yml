@@ -158,8 +158,8 @@ jobs:
           httpx)
             # VERIFIED: httpx -l list -ports X -threads X -silent -o file
             if [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt; else echo "$DOM" > targets.txt; IN=targets.txt; fi
-            httpx -l "$IN" -ports 80,443,8080,8443 -threads 50 -silent -o output/probe/httpx.txt
-            cat output/probe/httpx.txt | cut -d' ' -f1 > output/probe/live.txt
+            httpx -l "$IN" -ports 80,443,8080,8443 -threads 50 -silent -no-color -o output/probe/httpx.txt
+            cat output/probe/httpx.txt | sed 's/\x1B\[[0-9;]\{1,\}[A-Za-z]//g' | cut -d' ' -f1 | sort -u > output/probe/live.txt
             tg "HTTPX: $(wc -l < output/probe/live.txt) live"
             up output/probe/live.txt
             ;;
@@ -182,7 +182,7 @@ jobs:
                 paramspider -d "$d" 2>/dev/null || true
               done
             else
-              echo "ParamSpider: $DOM"
+              echo "ParamSpider: "$DOM"
               paramspider -d "$DOM" 2>/dev/null || true
             fi
             find results/ -name "*.txt" -exec cat {} \; 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt
@@ -206,7 +206,8 @@ jobs:
             ls -la output/probe/ || true
             if [ -s output/probe/live.txt ]; then
               echo "Found live.txt with $(wc -l < output/probe/live.txt) URLs"
-              cat output/probe/live.txt | while read url; do
+              # Ensure clean URLs
+              cat output/probe/live.txt | sed 's/\x1B\[[0-9;]\{1,\}[A-Za-z]//g' | while read url; do
                 echo "Nikto scanning: $url"
                 nikto -h "$url" -Tuning 123bde >> output/vulns/nikto.txt 2>&1 || true
               done
