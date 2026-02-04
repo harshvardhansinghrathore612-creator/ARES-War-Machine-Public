@@ -127,9 +127,12 @@ jobs:
         DOM=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
         
         echo "$TGT" | tr ',' '\n' > targets.txt
+        # Ensure targets have https for tools that need it
+        cat targets.txt | sed 's|^|https://|' | sed 's|https://https://|https://|' > targets_urls.txt
+        
         echo "Tool: $T | Target: $TGT | Domain: $DOM"
         
-        tg() { [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" >/dev/null || true; }
+        tg() { [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1 | Run ID: $GITHUB_RUN_ID" >/dev/null || true; }
         up() { [ -f "$1" ] && [ -s "$1" ] && python3 upload.py "$STGT" "$T" "$1" || true; }
         has_params() { [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; }
         
@@ -157,7 +160,7 @@ jobs:
           # === PROBE ===
           httpx)
             # VERIFIED: httpx -l list -ports X -threads X -silent -o file
-            if [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt; else echo "$DOM" > targets.txt; IN=targets.txt; fi
+            if [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt; else IN=targets.txt; fi
             httpx -l "$IN" -ports 80,443,8080,8443 -threads 50 -silent -no-color -o output/probe/httpx.txt
             cat output/probe/httpx.txt | sed -r 's/\x1B\[[0-9;]*[mK]//g' | cut -d' ' -f1 | sort -u > output/probe/live.txt
             tg "HTTPX: $(wc -l < output/probe/live.txt) live"
@@ -166,7 +169,7 @@ jobs:
             
           naabu)
             # VERIFIED: naabu -l list -top-ports X -silent -o file
-            if [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt; else echo "$DOM" > targets.txt; IN=targets.txt; fi
+            if [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt; else IN=targets.txt; fi
             naabu -l "$IN" -top-ports 100 -silent -o output/ports/naabu.txt
             tg "Naabu done"
             up output/ports/naabu.txt
@@ -182,19 +185,20 @@ jobs:
                 paramspider -d "$d" 2>/dev/null || true
               done
             else
-              echo "ParamSpider: $DOM"
-              paramspider -d "$DOM" 2>/dev/null || true
+              # Use manual targets
+              cat targets.txt | while read d; do
+                echo "ParamSpider: $d"
+                paramspider -d "$d" 2>/dev/null || true
+              done
             fi
             find results/ -name "*.txt" -exec cat {} \; 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt
             tg "ParamSpider: $(wc -l <output/crawl/param_urls.txt) URLs"
             up output/crawl/param_urls.txt
             ;;
             
-
-            
           # === VULN ===
           nuclei)
-            if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt; else echo "https://$DOM" > targets.txt; IN=targets.txt; fi
+            if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt; else IN=targets_urls.txt; fi
             nuclei -update-templates -silent >/dev/null 2>&1 || true
             nuclei -l "$IN" -tags cve,misconfig,dast,sqli,xss,tech,vulnerability,rce,lfi,ssrf,redirect,exposure -severity medium,high,critical -silent -o output/vulns/nuclei.txt
             tg "Nuclei: $(wc -l < output/vulns/nuclei.txt) vulns"
@@ -205,17 +209,18 @@ jobs:
             echo "Checking for live.txt..."
             ls -la output/probe/ || true
             if [ -s output/probe/live.txt ]; then
-              echo "Found live.txt with $(wc -l < output/probe/live.txt) URLs"
-              # Ensure clean URLs
-              cat output/probe/live.txt | sed -r 's/\x1B\[[0-9;]*[mK]//g' | while read url; do
-                echo "Nikto scanning: $url"
-                nikto -h "$url" -Tuning 123bde >> output/vulns/nikto.txt 2>&1 || true
-              done
+              IN=output/probe/live.txt
+              echo "Found live.txt"
             else
-              URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
-              echo "No live.txt, scanning single: $URL"
-              nikto -h "$URL" -Tuning 123bde > output/vulns/nikto.txt 2>&1 || true
+              IN=targets_urls.txt
+              echo "Using manual targets"
             fi
+            
+            # Ensure clean URLs and loop
+            cat "$IN" | sed -r 's/\x1B\[[0-9;]*[mK]//g' | while read url; do
+              echo "Nikto scanning: $url"
+              nikto -h "$url" -Tuning 123bde >> output/vulns/nikto.txt 2>&1 || true
+            done
             tg "Nikto done"
             up output/vulns/nikto.txt
             ;;
