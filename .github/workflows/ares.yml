@@ -217,6 +217,7 @@ jobs:
             ;;
             
           # === VULN ===
+          nuclei)
             if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt; else IN=targets_urls.txt; fi
             nuclei -update-templates >/dev/null 2>&1 || true
             
