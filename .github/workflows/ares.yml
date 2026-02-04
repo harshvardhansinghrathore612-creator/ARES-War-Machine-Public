@@ -45,11 +45,9 @@ jobs:
     - name: Restore Previous Data
       if: inputs.previous_run_id != ''
       run: |
-        echo "=== RESTORING DATA FROM RUN: ${{ inputs.previous_run_id }} ==="
-        gh run download ${{ inputs.previous_run_id }} -D prev_data || echo "Failed to download"
+        gh run download ${{ inputs.previous_run_id }} -D prev_data || true
         find prev_data -name "*.txt" | while read f; do
           base=$(basename "$f")
-          echo "Found: $f"
           if [[ "$base" == "all_subs.txt" ]] || [[ "$base" == "subfinder.txt" ]] || [[ "$base" == "amass.txt" ]]; then
             cp "$f" output/recon/
           elif [[ "$base" == "live.txt" ]] || [[ "$base" == "httpx.txt" ]]; then
@@ -60,8 +58,7 @@ jobs:
             cp "$f" output/ports/
           fi
         done
-        echo "=== FILES RESTORED ==="
-        find output -name "*.txt" -exec wc -l {} \;
+        find output -name "*.txt" -exec wc -l {} \; 2>/dev/null || true
 
     - name: Install Dependencies
       run: |
@@ -78,22 +75,14 @@ jobs:
             go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
             go install github.com/tomnomnom/assetfinder@latest
             ;;
-          amass) 
-            go install github.com/owasp-amass/amass/v4/...@latest || true
-            ;;
-          httpx) 
-            go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-            ;;
-          naabu) 
-            go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
-            ;;
+          amass) go install github.com/owasp-amass/amass/v4/...@latest || true ;;
+          httpx) go install github.com/projectdiscovery/httpx/cmd/httpx@latest ;;
+          naabu) go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest ;;
           nuclei) 
             go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
             nuclei -update-templates 2>/dev/null || true
             ;;
-          dalfox) 
-            go install github.com/hahwul/dalfox/v2@latest
-            ;;
+          dalfox) go install github.com/hahwul/dalfox/v2@latest ;;
           ffuf) 
             go install github.com/ffuf/ffuf/v2@latest
             sudo mkdir -p /usr/share/wordlists
@@ -105,25 +94,15 @@ jobs:
             sudo mkdir -p /usr/share/wordlists
             wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
             ;;
-          crlfuzz) 
-            go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest
-            ;;
-          subzy) 
-            go install github.com/PentestPad/subzy@latest
-            ;;
+          crlfuzz) go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest ;;
+          subzy) go install github.com/PentestPad/subzy@latest ;;
           paramspider) 
-            pip3 install paramspider
-            which paramspider || echo "paramspider not in PATH"
+            pip3 install git+https://github.com/devanshbatham/paramspider.git
+            paramspider --help || echo "Installed"
             ;;
-          arjun) 
-            pip3 install arjun
-            ;;
-          sqlmap) 
-            git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap
-            ;;
-          ghauri) 
-            pip3 install ghauri
-            ;;
+          arjun) pip3 install arjun ;;
+          sqlmap) git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap ;;
+          ghauri) pip3 install git+https://github.com/r0oth3x49/ghauri ;;
           xsstrike) 
             git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike
             cd $HOME/tools/xsstrike && pip3 install -r requirements.txt
@@ -136,12 +115,8 @@ jobs:
             git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap
             cd $HOME/tools/lfimap && pip3 install -r requirements.txt
             ;;
-          openredirex) 
-            pip3 install openredirex
-            ;;
-          commix) 
-            pip3 install commix
-            ;;
+          openredirex) pip3 install git+https://github.com/devanshbatham/OpenRedireX || pip3 install aiohttp ;;
+          commix) pip3 install commix ;;
           tplmap) 
             git clone https://github.com/epinna/tplmap $HOME/tools/tplmap
             cd $HOME/tools/tplmap && pip3 install -r requirements.txt || true
@@ -161,11 +136,8 @@ jobs:
         TGT="$TARGET"
         DOM=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
         
-        echo "=========================================="
-        echo "RUNNING: $T on $TGT (domain: $DOM)"
-        echo "=========================================="
+        echo "RUNNING: $T on $TGT"
         
-        # Check available input files
         [ -f output/recon/all_subs.txt ] && echo "all_subs.txt: $(wc -l < output/recon/all_subs.txt) lines"
         [ -f output/probe/live.txt ] && echo "live.txt: $(wc -l < output/probe/live.txt) lines"
         [ -f output/crawl/param_urls.txt ] && echo "param_urls.txt: $(wc -l < output/crawl/param_urls.txt) lines"
@@ -177,7 +149,7 @@ jobs:
             -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" >/dev/null 2>&1 || true
         }
         
-        tg " Started *$T* on \`$TGT\`"
+        tg " *$T* on \`$TGT\`"
         
         case "$T" in
           subfinder)
@@ -195,18 +167,13 @@ jobs:
             ;;
             
           httpx)
-            if [ -s output/recon/all_subs.txt ]; then
-              INPUT="output/recon/all_subs.txt"
-            else
-              echo "$TGT" | tr ',' '\n' > targets.txt
-              INPUT="targets.txt"
-            fi
-            echo "Input: $INPUT ($(wc -l < $INPUT) lines)"
+            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"
+            else echo "$TGT" | tr ',' '\n' > targets.txt; INPUT="targets.txt"; fi
             httpx -l "$INPUT" -ports 80,443,8080,8443 -threads 50 -o output/probe/httpx.txt
             cat output/probe/httpx.txt | awk '{print $1}' > output/probe/live.txt
             COUNT=$(wc -l < output/probe/live.txt)
             echo "RESULT: $COUNT live hosts"
-            tg " HTTPX: $COUNT live hosts"
+            tg " HTTPX: $COUNT live"
             ;;
             
           naabu)
@@ -216,28 +183,31 @@ jobs:
             ;;
             
           paramspider)
+            # Get list of domains to scan
             if [ -s output/probe/live.txt ]; then
               echo "Using live hosts"
-              cat output/probe/live.txt | head -30 | while read url; do
-                d=$(echo "$url" | sed 's|https\?://||;s|/.*||;s|:.*||')
-                echo "Scanning: $d"
-                paramspider -d "$d" -o output/crawl/ps_${d}.txt 2>&1 || true
-              done
+              cat output/probe/live.txt | sed 's|https\?://||;s|/.*||;s|:.*||' | sort -u > domains_to_scan.txt
             elif [ -s output/recon/all_subs.txt ]; then
               echo "Using subdomains"
-              cat output/recon/all_subs.txt | head -30 | while read d; do
-                echo "Scanning: $d"
-                paramspider -d "$d" -o output/crawl/ps_${d}.txt 2>&1 || true
-              done
+              cp output/recon/all_subs.txt domains_to_scan.txt
             else
-              echo "Scanning: $DOM"
-              paramspider -d "$DOM" -o output/crawl/ps_${DOM}.txt 2>&1 || true
+              echo "$DOM" > domains_to_scan.txt
             fi
-            cat output/crawl/ps_*.txt 2>/dev/null | grep -E "^https?://" | grep "=" | sort -u > output/crawl/param_urls.txt
+            
+            echo "Scanning $(wc -l < domains_to_scan.txt) domains"
+            mkdir -p output/crawl
+            
+            cat domains_to_scan.txt | head -30 | while read domain; do
+              echo "ParamSpider: $domain"
+              paramspider -d "$domain" 2>&1 | tee -a output/crawl/ps_output.txt || true
+            done
+            
+            # Collect results - paramspider outputs to results/<domain>.txt
+            find . -path "./results/*.txt" -exec cat {} \; 2>/dev/null | grep -E "^https?://" | grep "=" | sort -u > output/crawl/param_urls.txt
             COUNT=$(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0)
             echo "RESULT: $COUNT parameter URLs"
-            cat output/crawl/param_urls.txt | head -10
-            tg " ParamSpider: $COUNT parameter URLs"
+            head -20 output/crawl/param_urls.txt
+            tg " ParamSpider: $COUNT URLs"
             ;;
             
           arjun)
@@ -250,7 +220,7 @@ jobs:
             if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else echo "https://$TGT" > targets.txt; INPUT="targets.txt"; fi
             nuclei -l "$INPUT" -severity medium,high,critical -o output/vulns/nuclei.txt
             COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
-            tg " Nuclei: $COUNT vulnerabilities"
+            tg " Nuclei: $COUNT vulns"
             ;;
             
           nikto)
@@ -275,10 +245,9 @@ jobs:
             if [[ "$TGT" == *"="* ]]; then
               echo "$TGT" | tr ',' '\n' | dalfox pipe -o output/xss/dalfox.txt
             elif [ -s output/crawl/param_urls.txt ]; then
-              dalfox file output/crawl/param_urls.txt -o output/xss/dalfox.txt
+              head -50 output/crawl/param_urls.txt | dalfox pipe -o output/xss/dalfox.txt
             else
-              echo "ERROR: Dalfox needs URLs with parameters"
-              tg " Dalfox: No parameter URLs"
+              tg " Dalfox: No param URLs"
             fi
             tg " Dalfox done"
             ;;
@@ -344,9 +313,13 @@ jobs:
             
           openredirex)
             if [ -s output/crawl/param_urls.txt ]; then
-              cat output/crawl/param_urls.txt | openredirex -p "http://evil.com" > output/redirect/openredirex.txt 2>&1 || true
-            elif [[ "$TGT" == *"="* ]]; then
-              echo "$TGT" | openredirex -p "http://evil.com" > output/redirect/openredirex.txt 2>&1 || true
+              python3 -c "
+import sys
+for line in sys.stdin:
+    url = line.strip()
+    if '=' in url:
+        print(url.replace(url.split('=')[-1], 'http://evil.com'))
+" < output/crawl/param_urls.txt > output/redirect/openredirex.txt 2>&1 || true
             fi
             tg " OpenRedireX done"
             ;;
@@ -391,16 +364,12 @@ jobs:
             tg " Gitleaks done"
             ;;
             
-          *)
-            echo "Unknown tool: $T"
-            tg " Unknown tool: $T"
-            ;;
+          *) tg " Unknown: $T" ;;
         esac
         
-        echo "=========================================="
-        echo "SCAN COMPLETE - OUTPUT FILES:"
+        echo "=== OUTPUT FILES ==="
         find output -type f -name "*.txt" -exec wc -l {} \;
-        tg " Finished *$T*"
+        tg " *$T* done"
 
     - name: Upload to Drive
       if: always()
