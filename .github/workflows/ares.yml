@@ -45,13 +45,16 @@ jobs:
     - name: Restore Previous Data
       if: inputs.previous_run_id != ''
       run: |
+        echo "=== RESTORING FROM RUN: ${{ inputs.previous_run_id }} ==="
         gh run download ${{ inputs.previous_run_id }} -D prev_data || true
         find prev_data -name "*.txt" | while read f; do
           base=$(basename "$f")
+          echo "Found: $f"
           if [[ "$base" == "all_subs.txt" ]] || [[ "$base" == "subfinder.txt" ]]; then cp "$f" output/recon/; fi
           if [[ "$base" == "live.txt" ]] || [[ "$base" == "httpx.txt" ]]; then cp "$f" output/probe/; fi
           if [[ "$base" == "param_urls.txt" ]]; then cp "$f" output/crawl/; fi
         done
+        echo "=== RESTORED FILES ==="
         find output -name "*.txt" -exec wc -l {} \; 2>/dev/null || true
 
     - name: Install
@@ -72,22 +75,10 @@ jobs:
           feroxbuster) curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash; sudo mv feroxbuster /usr/local/bin/ || true; sudo mkdir -p /usr/share/wordlists; wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt ;;
           crlfuzz) go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest ;;
           subzy) go install github.com/PentestPad/subzy@latest ;;
-          paramspider)
-            cd $HOME/tools
-            git clone https://github.com/devanshbatham/paramspider.git
-            cd paramspider
-            pip3 install .
-            echo "ParamSpider installed"
-            ;;
+          paramspider) cd $HOME/tools; git clone https://github.com/devanshbatham/paramspider.git; cd paramspider; pip3 install . ;;
           arjun) pip3 install arjun ;;
           sqlmap) git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap ;;
-          ghauri)
-            cd $HOME/tools
-            git clone https://github.com/r0oth3x49/ghauri.git
-            cd ghauri
-            pip3 install -r requirements.txt
-            pip3 install .
-            ;;
+          ghauri) cd $HOME/tools; git clone https://github.com/r0oth3x49/ghauri.git; cd ghauri; pip3 install -r requirements.txt; pip3 install . ;;
           xsstrike) git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike; cd $HOME/tools/xsstrike && pip3 install -r requirements.txt ;;
           ssrfmap) git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap; cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt ;;
           lfimap) git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap; cd $HOME/tools/lfimap && pip3 install -r requirements.txt ;;
@@ -127,7 +118,7 @@ jobs:
             ;;
           httpx)
             if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
-            echo "Using: $INPUT"
+            echo "Using: $INPUT ($(wc -l < $INPUT) lines)"
             httpx -l "$INPUT" -ports 80,443,8080,8443 -threads 50 -o output/probe/httpx.txt
             cat output/probe/httpx.txt | awk '{print $1}' > output/probe/live.txt
             COUNT=$(wc -l < output/probe/live.txt)
@@ -135,19 +126,25 @@ jobs:
             tg " HTTPX: $COUNT live"
             ;;
           paramspider)
+            # Use live hosts from previous run OR subdomains OR target
             if [ -s output/probe/live.txt ]; then
+              echo "Using live hosts from previous scan"
               cat output/probe/live.txt | sed 's|https\?://||;s|/.*||;s|:.*||' | sort -u > domains.txt
             elif [ -s output/recon/all_subs.txt ]; then
+              echo "Using subdomains from previous scan"
               cp output/recon/all_subs.txt domains.txt
             else
+              echo "Using target domain"
               echo "$DOM" > domains.txt
             fi
             echo "Scanning $(wc -l < domains.txt) domains"
-            cat domains.txt | head -30 | while read d; do
+            cat domains.txt | while read d; do
               echo "ParamSpider: $d"
               paramspider -d "$d" 2>&1 || true
             done
-            find . -path "./results/*.txt" -exec cat {} \; 2>/dev/null | grep -E "^https?://" | grep "=" | sort -u > output/crawl/param_urls.txt
+            # Copy ALL results (not just filtered ones)
+            mkdir -p output/crawl
+            cat results/*.txt 2>/dev/null > output/crawl/param_urls.txt || true
             COUNT=$(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0)
             echo "RESULT: $COUNT parameter URLs"
             head -20 output/crawl/param_urls.txt
@@ -157,18 +154,23 @@ jobs:
             if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else echo "https://$TGT" > targets.txt; INPUT="targets.txt"; fi
             nuclei -l "$INPUT" -severity medium,high,critical -o output/vulns/nuclei.txt
             COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
+            echo "RESULT: $COUNT vulnerabilities"
             tg " Nuclei: $COUNT vulns"
             ;;
           sqlmap)
             if [[ "$TGT" == *"="* ]]; then
               echo "$TGT" | tr ',' '\n' | while read url; do
+                echo "Testing: $url"
                 timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
               done
             elif [ -s output/crawl/param_urls.txt ]; then
+              echo "Using param URLs from previous scan"
               head -15 output/crawl/param_urls.txt | while read url; do
                 echo "Testing: $url"
                 timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
               done
+            else
+              echo "No parameter URLs found"
             fi
             tg " SQLMap done"
             ;;
@@ -176,7 +178,10 @@ jobs:
             if [[ "$TGT" == *"="* ]]; then
               echo "$TGT" | tr ',' '\n' | dalfox pipe -o output/xss/dalfox.txt
             elif [ -s output/crawl/param_urls.txt ]; then
+              echo "Using param URLs from previous scan"
               head -50 output/crawl/param_urls.txt | dalfox pipe -o output/xss/dalfox.txt
+            else
+              echo "No parameter URLs found"
             fi
             tg " Dalfox done"
             ;;
@@ -200,6 +205,15 @@ jobs:
             echo "$URL" | crlfuzz -o output/crlf/crlfuzz.txt
             tg " CRLFuzz done"
             ;;
+          subzy)
+            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
+            subzy run --targets "$INPUT" --hide_fails --output output/takeover/subzy.txt
+            tg " Subzy done"
+            ;;
+          gitleaks)
+            gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>&1 || true
+            tg " Gitleaks done"
+            ;;
           *) tg " Unknown: $T" ;;
         esac
         
@@ -214,7 +228,101 @@ jobs:
         GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
         GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-      run: python3 upload_to_drive.py
+      run: |
+        python3 << 'PYTHON_SCRIPT'
+        import os, sys
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
+        from google.oauth2.credentials import Credentials
+        
+        tool = os.environ.get("TOOL", "unknown")
+        target = os.environ.get("SAFE_TARGET", "target")
+        folder_id = os.environ.get("GDRIVE_FOLDER_ID", "")
+        
+        if not folder_id:
+            print("No GDRIVE_FOLDER_ID set")
+            sys.exit(0)
+            
+        try:
+            creds = Credentials(
+                None,
+                refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+                client_secret=os.environ.get("GOOGLE_CLIENT_SECRET")
+            )
+            service = build("drive", "v3", credentials=creds)
+            
+            # Create target folder
+            target_folder = service.files().list(
+                q=f"name='{target}' and '{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                fields="files(id)"
+            ).execute().get("files", [])
+            
+            if target_folder:
+                target_folder_id = target_folder[0]["id"]
+            else:
+                target_folder_id = service.files().create(
+                    body={"name": target, "mimeType": "application/vnd.google-apps.folder", "parents": [folder_id]}
+                ).execute()["id"]
+            
+            # Create tool folder
+            tool_folder = service.files().list(
+                q=f"name='{tool}' and '{target_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                fields="files(id)"
+            ).execute().get("files", [])
+            
+            if tool_folder:
+                tool_folder_id = tool_folder[0]["id"]
+            else:
+                tool_folder_id = service.files().create(
+                    body={"name": tool, "mimeType": "application/vnd.google-apps.folder", "parents": [target_folder_id]}
+                ).execute()["id"]
+            
+            # Upload ONLY this tool's output files
+            tool_files = {
+                "subfinder": ["output/recon/subfinder.txt", "output/recon/all_subs.txt"],
+                "httpx": ["output/probe/httpx.txt", "output/probe/live.txt"],
+                "paramspider": ["output/crawl/param_urls.txt"],
+                "nuclei": ["output/vulns/nuclei.txt"],
+                "sqlmap": ["output/sql/sqlmap.txt"],
+                "dalfox": ["output/xss/dalfox.txt"],
+                "naabu": ["output/ports/naabu.txt"],
+                "nikto": ["output/vulns/nikto.txt"],
+                "ffuf": ["output/vulns/ffuf.json"],
+                "crlfuzz": ["output/crlf/crlfuzz.txt"],
+                "subzy": ["output/takeover/subzy.txt"],
+                "gitleaks": ["output/secrets/gitleaks.txt"],
+            }
+            
+            files_to_upload = tool_files.get(tool, [])
+            
+            for filepath in files_to_upload:
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    filename = os.path.basename(filepath)
+                    media = MediaFileUpload(filepath, resumable=True)
+                    
+                    # Check if file exists and update, otherwise create
+                    existing = service.files().list(
+                        q=f"name='{filename}' and '{tool_folder_id}' in parents and trashed=false",
+                        fields="files(id)"
+                    ).execute().get("files", [])
+                    
+                    if existing:
+                        service.files().update(fileId=existing[0]["id"], media_body=media).execute()
+                        print(f"Updated: {filename}")
+                    else:
+                        service.files().create(
+                            body={"name": filename, "parents": [tool_folder_id]},
+                            media_body=media
+                        ).execute()
+                        print(f"Uploaded: {filename}")
+                        
+            print(f"Drive upload complete for {tool}")
+            
+        except Exception as e:
+            print(f"Drive upload error: {e}")
+        PYTHON_SCRIPT
 
     - uses: actions/upload-artifact@v4
       if: always()
