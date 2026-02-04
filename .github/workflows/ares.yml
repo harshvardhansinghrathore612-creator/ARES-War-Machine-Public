@@ -208,10 +208,10 @@ jobs:
         TGT="$TARGET" # Shorthand for target
 
         echo "=========================================="
-        echo "ðŸŽ¯ ARES Scanner"
-        echo "ðŸ“‹ Tools: $TOOLS"
-        echo "ðŸŽ¯ Target: $TARGET"
-        echo "ðŸŒ Domain: $DOMAIN"
+        echo "---- ARES Scanner"
+        echo "---- Tools: $TOOLS"
+        echo "---- Target: $TARGET"
+        echo "---- Domain: $DOMAIN"
         echo "=========================================="
 
         # Telegram notification
@@ -221,7 +221,7 @@ jobs:
             -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" >/dev/null 2>&1 || true
         }
 
-        tg "ðŸš€ *ARES* scan started\n\nðŸ”§ Tools: \`$TOOLS\`\nðŸŽ¯ Target: \`$TARGET\`"
+        tg "---- *ARES* scan started\n\n---- Tools: \`$TOOLS\`\n---- Target: \`$TARGET\`"
 
         # Check if tool should run
         should_run() {
@@ -241,12 +241,12 @@ jobs:
         # SUBFINDER - Subdomain Enumeration
         ###########################################
         if should_run "subfinder"; then
-          echo ""; echo "=== ðŸ” SUBFINDER ==="
+          echo ""; echo "=== ---- SUBFINDER ==="
           subfinder -d $DOMAIN -all -o output/recon/subfinder.txt 2>&1 | tee output/recon/subfinder_log.txt || true
           assetfinder --subs-only $DOMAIN >> output/recon/subs.txt 2>&1 || true
           cat output/recon/*.txt 2>/dev/null | sort -u > output/recon/all_subs.txt
           echo "[+] Subdomains: $(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0)"
-          tg "âœ… Subfinder: $(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0) subdomains"
+          tg "--- Subfinder: $(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0) subdomains"
           upload_tool_results "subfinder"
         fi
 
@@ -254,11 +254,11 @@ jobs:
         # AMASS - Deep Subdomain Discovery
         ###########################################
         if should_run "amass"; then
-          echo ""; echo "=== ðŸ”Ž AMASS ==="
+          echo ""; echo "=== ---- AMASS ==="
           timeout 1800 amass enum -passive -d $DOMAIN -o output/recon/amass.txt 2>&1 | tee output/recon/amass_log.txt || true
           cat output/recon/amass.txt >> output/recon/all_subs.txt 2>/dev/null || true
           sort -u -o output/recon/all_subs.txt output/recon/all_subs.txt
-          tg "âœ… Amass complete"
+          tg "--- Amass complete"
           upload_tool_results "amass"
         fi
 
@@ -266,13 +266,13 @@ jobs:
         # HTTPX - Live Host Detection
         ###########################################
         if should_run "httpx"; then
-          echo ""; echo "=== ðŸŒ HTTPX ==="
+          echo ""; echo "=== ---- HTTPX ==="
           [ ! -s output/recon/all_subs.txt ] && echo "$DOMAIN" > output/recon/all_subs.txt
           httpx -l output/recon/all_subs.txt -ports 80,443,8080,8443 -threads 50 -timeout 10 \
             -status-code -title -o output/probe/httpx.txt 2>&1 | tee output/probe/httpx_log.txt || true
           cat output/probe/httpx.txt | cut -d" " -f1 > output/probe/live.txt
           echo "[+] Live: $(wc -l < output/probe/live.txt 2>/dev/null || echo 0)"
-          tg "âœ… HTTPX: $(wc -l < output/probe/live.txt 2>/dev/null || echo 0) live hosts"
+          tg "--- HTTPX: $(wc -l < output/probe/live.txt 2>/dev/null || echo 0) live hosts"
           upload_tool_results "httpx"
         fi
 
@@ -280,11 +280,11 @@ jobs:
         # NAABU - Port Scanner
         ###########################################
         if should_run "naabu"; then
-          echo ""; echo "=== ðŸ”Œ NAABU ==="
+          echo ""; echo "=== ---- NAABU ==="
           [ ! -s output/recon/all_subs.txt ] && echo "$DOMAIN" > output/recon/all_subs.txt
           naabu -l output/recon/all_subs.txt -p 80,443,8080,8443,8000,3000,9000 -c 50 \
             -o output/ports/naabu.txt 2>&1 | tee output/ports/naabu_log.txt || true
-          tg "âœ… Naabu: $(wc -l < output/ports/naabu.txt 2>/dev/null || echo 0) ports"
+          tg "--- Naabu: $(wc -l < output/ports/naabu.txt 2>/dev/null || echo 0) ports"
           upload_tool_results "naabu"
         fi
 
@@ -292,13 +292,13 @@ jobs:
         # PARAMSPIDER - Parameter Discovery
         ###########################################
         if should_run "paramspider"; then
-          echo ""; echo "=== ðŸ•·ï¸ PARAMSPIDER ==="
+          echo ""; echo "=== ------- PARAMSPIDER ==="
           cd $HOME/tools/paramspider
           python3 -m paramspider -d $DOMAIN --level high -o $GITHUB_WORKSPACE/output/crawl/params.txt 2>&1 | tee $GITHUB_WORKSPACE/output/crawl/paramspider_log.txt || true
           cd $GITHUB_WORKSPACE
           grep -E "^http" output/crawl/params.txt 2>/dev/null | grep -E "\?" > output/crawl/param_urls.txt || true
           echo "[+] Params: $(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0)"
-          tg "âœ… ParamSpider: $(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0) URLs"
+          tg "--- ParamSpider: $(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0) URLs"
           upload_tool_results "paramspider"
         fi
 
@@ -306,10 +306,10 @@ jobs:
         # ARJUN - Hidden Parameter Discovery
         ###########################################
         if should_run "arjun"; then
-          echo ""; echo "=== ðŸŽ¯ ARJUN ==="
+          echo ""; echo "=== ---- ARJUN ==="
           URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
           arjun -u "$URL" -oT output/crawl/arjun.txt 2>&1 | tee output/crawl/arjun_log.txt || true
-          tg "âœ… Arjun complete"
+          tg "--- Arjun complete"
           upload_tool_results "arjun"
         fi
 
@@ -317,7 +317,7 @@ jobs:
         # NUCLEI - Template Scanner
         ###########################################
         if should_run "nuclei"; then
-          echo ""; echo "=== â˜¢ï¸ NUCLEI ==="
+          echo ""; echo "=== ------ NUCLEI ==="
           if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else echo "https://$TGT" > targets.txt; INPUT="targets.txt"; fi
           echo "Nuclei Input: $INPUT"
           cat "$INPUT"
@@ -327,7 +327,7 @@ jobs:
             -c 50 -timeout 10 -o output/vulns/nuclei.txt 2>&1 | tee output/vulns/nuclei_log.txt || true
           COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
           echo "RESULT: $COUNT vulnerabilities"
-          tg "âœ… Nuclei: $COUNT vulns"
+          tg "--- Nuclei: $COUNT vulns"
           upload_tool_results "nuclei"
         fi
 
@@ -335,10 +335,10 @@ jobs:
         # NIKTO - Web Server Scanner
         ###########################################
         if should_run "nikto"; then
-          echo ""; echo "=== ðŸ”¬ NIKTO ==="
+          echo ""; echo "=== ---- NIKTO ==="
           URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
           timeout 600 nikto -h "$URL" -Tuning 123bde -maxtime 300 > output/vulns/nikto.txt 2>&1 | tee output/vulns/nikto_log.txt || true
-          tg "âœ… Nikto complete"
+          tg "--- Nikto complete"
           upload_tool_results "nikto"
         fi
 
@@ -346,11 +346,11 @@ jobs:
         # FFUF - Directory Fuzzing
         ###########################################
         if should_run "ffuf"; then
-          echo ""; echo "=== ðŸ“ FFUF ==="
+          echo ""; echo "=== ---- FFUF ==="
           URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
           ffuf -u "$URL/FUZZ" -w /usr/share/wordlists/common.txt -t 100 -mc 200,204,301,302,401,403 \
             -o output/vulns/ffuf.json 2>&1 | tee output/vulns/ffuf_log.txt || true
-          tg "âœ… FFUF complete"
+          tg "--- FFUF complete"
           upload_tool_results "ffuf"
         fi
 
@@ -358,11 +358,11 @@ jobs:
         # FEROXBUSTER - Recursive Discovery
         ###########################################
         if should_run "feroxbuster"; then
-          echo ""; echo "=== ðŸ¦€ FEROXBUSTER ==="
+          echo ""; echo "=== ---- FEROXBUSTER ==="
           URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
           timeout 900 feroxbuster -u "$URL" -w /usr/share/wordlists/common.txt -t 50 -d 3 \
             -o output/vulns/feroxbuster.txt 2>&1 | tee output/vulns/feroxbuster_log.txt || true
-          tg "âœ… Feroxbuster complete"
+          tg "--- Feroxbuster complete"
           upload_tool_results "feroxbuster"
         fi
 
@@ -370,7 +370,7 @@ jobs:
         # DALFOX - XSS Scanner
         ###########################################
         if should_run "dalfox"; then
-          echo ""; echo "=== ðŸ’‰ DALFOX (XSS) ==="
+          echo ""; echo "=== ---- DALFOX (XSS) ==="
           if [ -s output/crawl/param_urls.txt ]; then
             dalfox file output/crawl/param_urls.txt --silence -o output/xss/dalfox.txt 2>&1 | tee output/xss/dalfox_log.txt || true
           elif [[ "$TGT" == *"?"* ]]; then
@@ -378,7 +378,7 @@ jobs:
           else
             echo "[!] No param URLs for Dalfox"
           fi
-          tg "âœ… Dalfox: $(wc -l < output/xss/dalfox.txt 2>/dev/null || echo 0) XSS"
+          tg "--- Dalfox: $(wc -l < output/xss/dalfox.txt 2>/dev/null || echo 0) XSS"
           upload_tool_results "dalfox"
         fi
 
@@ -386,7 +386,7 @@ jobs:
         # XSSTRIKE - Advanced XSS
         ###########################################
         if should_run "xsstrike"; then
-          echo ""; echo "=== âš¡ XSSTRIKE ==="
+          echo ""; echo "=== --- XSSTRIKE ==="
           if [[ "$TGT" == *"?"* ]]; then
             cd $HOME/tools/xsstrike
             timeout 600 python3 xsstrike.py -u "$TGT" --crawl -l 2 > $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 | tee $GITHUB_WORKSPACE/output/xss/xsstrike_log.txt || true
@@ -398,7 +398,7 @@ jobs:
               cd $GITHUB_WORKSPACE
             done
           fi
-          tg "âœ… XSStrike complete"
+          tg "--- XSStrike complete"
           upload_tool_results "xsstrike"
         fi
 
@@ -406,7 +406,7 @@ jobs:
         # SQLMAP - SQL Injection
         ###########################################
         if should_run "sqlmap"; then
-          echo ""; echo "=== ðŸ’¾ SQLMAP ==="
+          echo ""; echo "=== ---- SQLMAP ==="
           mkdir -p output/sql/sqlmap
           if [[ "$TGT" == *"?"* ]]; then
             timeout 900 python3 $HOME/tools/sqlmap/sqlmap.py -u "$TGT" --batch --risk 2 --level 3 \
@@ -421,7 +421,7 @@ jobs:
           else
             echo "[!] SQLMap needs parameterized URLs"
           fi
-          tg "âœ… SQLMap complete"
+          tg "--- SQLMap complete"
           upload_tool_results "sqlmap"
         fi
 
@@ -429,7 +429,7 @@ jobs:
         # GHAURI - Advanced SQLi
         ###########################################
         if should_run "ghauri"; then
-          echo ""; echo "=== ðŸ”¥ GHAURI ==="
+          echo ""; echo "=== ---- GHAURI ==="
           if [[ "$TGT" == *"?"* ]]; then
             cd $HOME/tools/ghauri
             timeout 600 python3 -m ghauri -u "$TGT" --batch > $GITHUB_WORKSPACE/output/sql/ghauri.txt 2>&1 | tee $GITHUB_WORKSPACE/output/sql/ghauri_log.txt || true
@@ -441,7 +441,7 @@ jobs:
               cd $GITHUB_WORKSPACE
             done
           fi
-          tg "âœ… Ghauri complete"
+          tg "--- Ghauri complete"
           upload_tool_results "ghauri"
         fi
 
@@ -449,21 +449,21 @@ jobs:
         # SSRFMAP - SSRF Scanner
         ###########################################
         if should_run "ssrfmap"; then
-          echo ""; echo "=== ðŸŒ SSRFMAP ==="
+          echo ""; echo "=== ---- SSRFMAP ==="
           if [[ "$TARGET" == *"?"* ]]; then
             cd $HOME/tools/ssrfmap
             timeout 600 python3 ssrfmap.py -r <(echo -e "GET $TARGET HTTP/1.1\nHost: $(echo $TARGET | cut -d/ -f3)") \
               -p url > $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt 2>&1 || true
             cd $GITHUB_WORKSPACE
           fi
-          tg "âœ… SSRFmap complete"
+          tg "--- SSRFmap complete"
         fi
 
         ###########################################
         # LFIMAP - LFI Scanner
         ###########################################
         if should_run "lfimap"; then
-          echo ""; echo "=== ðŸ“‚ LFIMAP ==="
+          echo ""; echo "=== ---- LFIMAP ==="
           if [[ "$TARGET" == *"?"* ]]; then
             cd $HOME/tools/lfimap
             timeout 600 python3 lfimap.py -U "$TARGET" > $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
@@ -475,36 +475,36 @@ jobs:
               cd $GITHUB_WORKSPACE
             done
           fi
-          tg "âœ… LFImap complete"
+          tg "--- LFImap complete"
         fi
 
         ###########################################
         # OPENREDIREX - Open Redirect Scanner
         ###########################################
         if should_run "openredirex"; then
-          echo ""; echo "=== â†ªï¸ OPENREDIREX ==="
+          echo ""; echo "=== ------ OPENREDIREX ==="
           if [ -s output/crawl/param_urls.txt ]; then
             cat output/crawl/param_urls.txt | python3 $HOME/tools/openredirex/openredirex.py -p "https://evil.com" \
               > output/redirect/openredirex.txt 2>/dev/null || true
           fi
-          tg "âœ… OpenRedireX complete"
+          tg "--- OpenRedireX complete"
         fi
 
         ###########################################
         # CRLFUZZ - CRLF Injection
         ###########################################
         if should_run "crlfuzz"; then
-          echo ""; echo "=== â†©ï¸ CRLFUZZ ==="
+          echo ""; echo "=== ------ CRLFUZZ ==="
           URL="$TARGET"; [[ "$URL" != http* ]] && URL="https://$TARGET"
           echo "$URL" | crlfuzz -o output/crlf/crlfuzz.txt 2>/dev/null || true
-          tg "âœ… CRLFuzz: $(wc -l < output/crlf/crlfuzz.txt 2>/dev/null || echo 0) findings"
+          tg "--- CRLFuzz: $(wc -l < output/crlf/crlfuzz.txt 2>/dev/null || echo 0) findings"
         fi
 
         ###########################################
         # COMMIX - Command Injection
         ###########################################
         if should_run "commix"; then
-          echo ""; echo "=== ðŸ’€ COMMIX ==="
+          echo ""; echo "=== ---- COMMIX ==="
           if [[ "$TARGET" == *"?"* ]]; then
             timeout 600 commix -u "$TARGET" --batch --all > output/cmdi/commix.txt 2>&1 || true
           elif [ -s output/crawl/param_urls.txt ]; then
@@ -512,14 +512,14 @@ jobs:
               timeout 120 commix -u "$url" --batch >> output/cmdi/commix.txt 2>&1 || true
             done
           fi
-          tg "âœ… Commix complete"
+          tg "--- Commix complete"
         fi
 
         ###########################################
         # TPLMAP - SSTI Scanner
         ###########################################
         if should_run "tplmap"; then
-          echo ""; echo "=== ðŸ“ TPLMAP (SSTI) ==="
+          echo ""; echo "=== ---- TPLMAP (SSTI) ==="
           if [[ "$TARGET" == *"?"* ]]; then
             cd $HOME/tools/tplmap
             timeout 600 python3 tplmap.py -u "$TARGET" > $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
@@ -531,30 +531,30 @@ jobs:
               cd $GITHUB_WORKSPACE
             done
           fi
-          tg "âœ… Tplmap complete"
+          tg "--- Tplmap complete"
         fi
 
         ###########################################
         # SUBZY - Subdomain Takeover
         ###########################################
         if should_run "subzy"; then
-          echo ""; echo "=== ðŸŽ¯ SUBZY ==="
+          echo ""; echo "=== ---- SUBZY ==="
           [ ! -s output/recon/all_subs.txt ] && echo "$DOMAIN" > output/recon/all_subs.txt
           subzy run --targets output/recon/all_subs.txt --hide_fails --output output/takeover/subzy.txt 2>/dev/null || true
-          tg "âœ… Subzy complete"
+          tg "--- Subzy complete"
         fi
 
         ###########################################
         # GITLEAKS - Secret Detection
         ###########################################
         if should_run "gitleaks"; then
-          echo ""; echo "=== ðŸ” GITLEAKS ==="
+          echo ""; echo "=== ---- GITLEAKS ==="
           gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>&1 || true
-          tg "âœ… Gitleaks complete"
+          tg "--- Gitleaks complete"
         fi
 
         # Upload results
-        echo ""; echo "=== ðŸ“¤ UPLOADING RESULTS ==="
+        echo ""; echo "=== ---- UPLOADING RESULTS ==="
         for dir in recon probe crawl vulns sql xss ssrf lfi redirect crlf cmdi ssti takeover secrets ports; do
           if [ -d "output/$dir" ] && [ "$(ls -A output/$dir 2>/dev/null)" ]; then
             zip -r "${dir}.zip" "output/$dir/" 2>/dev/null
@@ -564,13 +564,14 @@ jobs:
 
         echo ""
         echo "=========================================="
-        echo "ðŸ ARES Scan Complete!"
+        echo "---- ARES Scan Complete!"
         echo "=========================================="
-        tg "ðŸ *ARES* scan complete on \`$TARGET\`"
+        tg "---- *ARES* scan complete on \`$TARGET\`"
 
     - name: Cleanup
       if: always()
       run: |
         rm -rf output/ *.zip drive_upload.py 2>/dev/null || true
         rm -rf $HOME/tools/ $HOME/SecLists/ 2>/dev/null || true
+
 
