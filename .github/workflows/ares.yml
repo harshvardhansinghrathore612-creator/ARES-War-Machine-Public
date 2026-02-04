@@ -53,6 +53,7 @@ jobs:
       run: |
         sudo apt-get update -qq >/dev/null 2>&1
         sudo apt-get install -y -qq python3-pip curl wget git libpcap-dev nikto jq >/dev/null 2>&1
+        pip3 install -q google-api-python-client google-auth-httplib2 google-auth-oauthlib
         T="${{ github.event.inputs.scan_type }}"
         case "$T" in
           subfinder) go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest 2>/dev/null; go install github.com/tomnomnom/assetfinder@latest 2>/dev/null ;;
@@ -249,6 +250,15 @@ jobs:
             ;;
         esac
         tg "Finished $T"
+
+    - name: Upload to Drive
+      if: always()
+      env:
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+      run: python3 upload_to_drive.py
 
     - uses: actions/upload-artifact@v4
       if: always()
