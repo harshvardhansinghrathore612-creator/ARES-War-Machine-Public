@@ -148,8 +148,8 @@ jobs:
             echo "Nuclei Input: $INPUT"
             cat "$INPUT"
             echo "---"
-            # REMOVED TIMEOUT FLAGS entirely
-            nuclei -l "$INPUT" -severity medium,high,critical -o output/vulns/nuclei.txt -retries 2 -v
+            # UNLIMITED MODE + SEVERITY FILTER (As requested)
+            nuclei -l "$INPUT" -severity medium,high,critical -o output/vulns/nuclei.txt -retries 2 -timeout 30 -v
             COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
             echo "RESULT: $COUNT vulnerabilities"
             tg " Nuclei: $COUNT vulns"
