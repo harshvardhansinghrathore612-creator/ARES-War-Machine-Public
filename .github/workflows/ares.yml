@@ -174,7 +174,7 @@ jobs:
             
           # === CRAWL ===
           paramspider)
-            # VERIFIED: paramspider -d domain --level high -o file
+            # FIXED: Use new paramspider command directly
             if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt
             elif [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt
             else echo "$DOM" > targets.txt; IN=targets.txt; fi
@@ -183,12 +183,10 @@ jobs:
             cat "$IN" | head -50 | while read line; do
               d=$(echo "$line" | sed 's|https\?://||;s|/.*||')
               echo "ParamSpider: $d"
-              cd $HOME/tools/paramspider
-              python3 paramspider.py -d "$d" --level high -o $GITHUB_WORKSPACE/output/crawl/ps_out/${d//[^a-zA-Z0-9]/_}.txt 2>/dev/null || true
-              cd $GITHUB_WORKSPACE
+              paramspider -d "$d" --level high -o output/crawl/ps_out/${d//[^a-zA-Z0-9]/_}.txt 2>/dev/null || true
             done
             cat output/crawl/ps_out/*.txt 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt
-            tg "ParamSpider: $(wc -l < output/crawl/param_urls.txt) URLs"
+            tg "ParamSpider: $(wc -l <output/crawl/param_urls.txt) URLs"
             up output/crawl/param_urls.txt
             ;;
             
