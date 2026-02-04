@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       scan_type:
-        description: 'Comma-separated tools OR "all"'
+        description: 'Tool to run'
         required: true
-        default: 'all'
+        default: 'subfinder'
         type: string
       target:
-        description: 'Target(s)'
+        description: 'Target (domain, URL, or URL with params)'
         required: true
         type: string
       previous_run_id:
-        description: 'Chain Artifacts from Run ID'
+        description: 'Use results from previous Run ID'
         required: false
         type: string
 
@@ -34,56 +34,42 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup Environment
+    - name: Setup
       run: |
         mkdir -p output/{recon,probe,crawl,vulns,sql,xss,ssrf,lfi,redirect,crlf,cmdi,ssti,takeover,secrets,ports}
-        echo "SCAN_TOOLS=${{ github.event.inputs.scan_type }}" >> $GITHUB_ENV
+        echo "TOOL=${{ github.event.inputs.scan_type }}" >> $GITHUB_ENV
         echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
         echo "$HOME/.local/bin" >> $GITHUB_PATH
         mkdir -p $HOME/go/bin $HOME/tools $HOME/.local/bin
         
-        # Create target folder name (sanitize for Drive)
+        # Safe target name for Drive folder
         TARGET="${{ github.event.inputs.target }}"
-        SAFE_TARGET=$(echo "$TARGET" | sed 's/[^a-zA-Z0-9]/_/g' | head -c 50)
+        SAFE_TARGET=$(echo "$TARGET" | sed 's/[^a-zA-Z0-9]/_/g' | cut -c1-50)
         echo "SAFE_TARGET=$SAFE_TARGET" >> $GITHUB_ENV
 
-    - name: Restore Previous Scan Data
+    - name: Restore Previous Results
       if: ${{ github.event.inputs.previous_run_id != '' }}
       run: |
-        PREV_ID=${{ github.event.inputs.previous_run_id }}
-        echo " Downloading artifacts from Run $PREV_ID..."
-        gh run download $PREV_ID -D output_prev 2>/dev/null || true
-        # Move downloaded files into output folder
-        if [ -d "output_prev" ]; then
-          find output_prev -type f -name "*.txt" -exec cp {} output/ \; 2>/dev/null || true
-          # Check for specific recon/probe files
-          [ -f "output_prev/recon/all_subs.txt" ] && cp output_prev/recon/all_subs.txt output/recon/ 2>/dev/null || true
-          [ -f "output_prev/probe/live.txt" ] && cp output_prev/probe/live.txt output/probe/ 2>/dev/null || true
-          [ -f "output_prev/crawl/param_urls.txt" ] && cp output_prev/crawl/param_urls.txt output/crawl/ 2>/dev/null || true
-          echo " Previous data restored"
-        fi
+        PREV_ID="${{ github.event.inputs.previous_run_id }}"
+        echo "⬇️ Downloading Run $PREV_ID..."
+        gh run download $PREV_ID -D prev_data 2>/dev/null || true
+        # Find and copy result files
+        find prev_data -name "*.txt" -exec cp {} output/ \; 2>/dev/null || true
+        find prev_data -name "all_subs.txt" -exec cp {} output/recon/ \; 2>/dev/null || true
+        find prev_data -name "live.txt" -exec cp {} output/probe/ \; 2>/dev/null || true
+        find prev_data -name "param_urls.txt" -exec cp {} output/crawl/ \; 2>/dev/null || true
+        echo " Previous data loaded"
 
-    - name: Install System Dependencies
+    - name: Install Dependencies
       run: |
-        echo " Installing System Packages..."
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq python3-pip zip curl wget git libpcap-dev nikto jq ruby-full >/dev/null 2>&1
-        echo " System Ready"
-
-    - name: Setup Drive Uploader
-      env:
-        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-        GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-        GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
-        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-      run: |
+        sudo apt-get update -qq >/dev/null 2>&1
+        sudo apt-get install -y -qq python3-pip zip curl wget git libpcap-dev nikto jq >/dev/null 2>&1
         pip3 install -q google-api-python-client google-auth-httplib2 google-auth-oauthlib
         
-        # Create Drive Uploader Script
+        # Drive Uploader
         cat << 'PYEOF' > drive_upload.py
 import os, sys
-
 def upload(file_path, target_folder, tool_name):
     try:
         from google.oauth2.credentials import Credentials
@@ -95,115 +81,128 @@ def upload(file_path, target_folder, tool_name):
             token_uri="https://oauth2.googleapis.com/token", 
             client_id=os.environ.get("GOOGLE_CLIENT_ID"), 
             client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"))
-            
         service = build("drive","v3",credentials=creds)
         parent = os.environ.get("GDRIVE_FOLDER_ID")
+        if not parent: return print(" No GDRIVE_FOLDER_ID")
         
-        if not parent:
-            print(" No GDRIVE_FOLDER_ID set!")
-            return
-        
-        # 1. Find or Create TARGET folder (e.g. "example_com")
+        # Find/Create target folder
         q = f"name='{target_folder}' and '{parent}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
         res = service.files().list(q=q, fields="files(id)").execute().get("files",[])
-        if res:
-            target_id = res[0]["id"]
-        else:
-            target_id = service.files().create(body={"name":target_folder,"parents":[parent],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
-            print(f" Created folder: {target_folder}")
+        target_id = res[0]["id"] if res else service.files().create(body={"name":target_folder,"parents":[parent],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
         
-        # 2. Find or Create TOOL folder inside target (e.g. "subfinder")
+        # Find/Create tool folder
         q = f"name='{tool_name}' and '{target_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
         res = service.files().list(q=q, fields="files(id)").execute().get("files",[])
-        if res:
-            tool_id = res[0]["id"]
-        else:
-            tool_id = service.files().create(body={"name":tool_name,"parents":[target_id],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
+        tool_id = res[0]["id"] if res else service.files().create(body={"name":tool_name,"parents":[target_id],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
         
-        # 3. Upload the file
-        file_name = os.path.basename(file_path)
-        media = MediaFileUpload(file_path)
-        file = service.files().create(body={"name":file_name,"parents":[tool_id]}, media_body=media).execute()
-        print(f" Uploaded {file_name} to {target_folder}/{tool_name}")
-        
+        # Upload
+        file = service.files().create(body={"name":os.path.basename(file_path),"parents":[tool_id]}, media_body=MediaFileUpload(file_path)).execute()
+        print(f" Uploaded to {target_folder}/{tool_name}")
     except Exception as e:
         print(f" Upload Error: {e}")
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 4:
-        upload(sys.argv[1], sys.argv[2], sys.argv[3])
-    else:
-        print("Usage: python3 drive_upload.py <file> <target_folder> <tool_name>")
+    if len(sys.argv) >= 4: upload(sys.argv[1], sys.argv[2], sys.argv[3])
 PYEOF
-        echo " Drive Uploader Ready"
 
-    - name: Install Selected Tools
+    - name: Install Tool
       run: |
-        TOOLS="$SCAN_TOOLS"
-        should_install() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
+        TOOL="$TOOL"
         export PATH=$PATH:$HOME/go/bin:$HOME/.local/bin
         
-        echo " Installing Tools..."
+        echo " Installing $TOOL..."
+        
+        case "$TOOL" in
+          subfinder)
+            go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest >/dev/null 2>&1
+            go install -v github.com/tomnomnom/assetfinder@latest >/dev/null 2>&1
+            ;;
+          amass)
+            go install -v github.com/owasp-amass/amass/v4/...@latest >/dev/null 2>&1 || true
+            ;;
+          httpx)
+            go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest >/dev/null 2>&1
+            ;;
+          naabu)
+            go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest >/dev/null 2>&1
+            ;;
+          nuclei)
+            go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest >/dev/null 2>&1
+            ;;
+          dalfox)
+            go install -v github.com/hahwul/dalfox/v2@latest >/dev/null 2>&1
+            ;;
+          ffuf)
+            go install -v github.com/ffuf/ffuf/v2@latest >/dev/null 2>&1
+            sudo mkdir -p /usr/share/wordlists
+            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
+            ;;
+          feroxbuster)
+            curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash >/dev/null 2>&1
+            sudo mv feroxbuster /usr/local/bin/ || true
+            sudo mkdir -p /usr/share/wordlists
+            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
+            ;;
+          crlfuzz)
+            go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest >/dev/null 2>&1
+            ;;
+          subzy)
+            go install -v github.com/PentestPad/subzy@latest >/dev/null 2>&1
+            ;;
+          gowitness)
+            go install -v github.com/sensepost/gowitness@latest >/dev/null 2>&1
+            ;;
+          paramspider)
+            # VERIFIED: Clone and install properly
+            git clone --depth 1 https://github.com/devanshbatham/paramspider $HOME/tools/paramspider >/dev/null 2>&1 || true
+            cd $HOME/tools/paramspider
+            pip3 install -e . -q || pip3 install . -q || true
+            ;;
+          arjun)
+            pip3 install arjun -q
+            ;;
+          sqlmap)
+            git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap >/dev/null 2>&1 || true
+            ;;
+          ghauri)
+            # VERIFIED: Clone and install
+            git clone --depth 1 https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri >/dev/null 2>&1 || true
+            cd $HOME/tools/ghauri
+            pip3 install -e . -q || pip3 install -r requirements.txt -q || true
+            ;;
+          xsstrike)
+            git clone --depth 1 https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike >/dev/null 2>&1 || true
+            cd $HOME/tools/xsstrike && pip3 install -r requirements.txt -q || true
+            ;;
+          ssrfmap)
+            git clone --depth 1 https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap >/dev/null 2>&1 || true
+            cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt -q || true
+            ;;
+          lfimap)
+            git clone --depth 1 https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap >/dev/null 2>&1 || true
+            cd $HOME/tools/lfimap && pip3 install -r requirements.txt -q || true
+            ;;
+          openredirex)
+            git clone --depth 1 https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex >/dev/null 2>&1 || true
+            ;;
+          commix)
+            pip3 install commix -q
+            ;;
+          tplmap)
+            git clone --depth 1 https://github.com/epinna/tplmap $HOME/tools/tplmap >/dev/null 2>&1 || true
+            cd $HOME/tools/tplmap && pip3 install -r requirements.txt -q 2>/dev/null || true
+            ;;
+          gitleaks)
+            curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz >/dev/null 2>&1
+            sudo mv gitleaks /usr/local/bin/ || true
+            ;;
+          nikto)
+            echo "Nikto pre-installed"
+            ;;
+        esac
+        echo " $TOOL Ready"
 
-        # GO TOOLS
-        should_install "subfinder" && go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest >/dev/null 2>&1
-        (should_install "assetfinder" || should_install "subfinder") && go install -v github.com/tomnomnom/assetfinder@latest >/dev/null 2>&1
-        should_install "httpx" && go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest >/dev/null 2>&1
-        should_install "naabu" && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest >/dev/null 2>&1
-        should_install "nuclei" && go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest >/dev/null 2>&1
-        should_install "dalfox" && go install -v github.com/hahwul/dalfox/v2@latest >/dev/null 2>&1
-        should_install "ffuf" && go install -v github.com/ffuf/ffuf/v2@latest >/dev/null 2>&1
-        should_install "crlfuzz" && go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest >/dev/null 2>&1
-        should_install "subzy" && go install -v github.com/PentestPad/subzy@latest >/dev/null 2>&1
-        should_install "gowitness" && go install -v github.com/sensepost/gowitness@latest >/dev/null 2>&1
-        should_install "amass" && go install -v github.com/owasp-amass/amass/v4/...@latest >/dev/null 2>&1 || true
-
-        # PYTHON TOOLS (PIP)
-        should_install "arjun" && pip3 install arjun -q
-        should_install "commix" && pip3 install commix -q
-        
-        # ParamSpider - FIXED: Use pip install from git directly
-        if should_install "paramspider"; then
-           pip3 install git+https://github.com/devanshbatham/paramspider.git -q || true
-        fi
-        
-        should_install "sqlmap" && git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap >/dev/null 2>&1 || true
-        
-        if should_install "ghauri"; then
-           pip3 install git+https://github.com/r0oth3x49/ghauri.git -q || true
-        fi
-        
-        if should_install "ssrfmap"; then
-           git clone --depth 1 https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap >/dev/null 2>&1 || true
-           cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt -q || true
-        fi
-        
-        if should_install "lfimap"; then
-           git clone --depth 1 https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap >/dev/null 2>&1 || true
-           cd $HOME/tools/lfimap && pip3 install -r requirements.txt -q || true
-        fi
-        
-        should_install "openredirex" && git clone --depth 1 https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex >/dev/null 2>&1 || true
-        
-        if should_install "tplmap"; then
-           git clone --depth 1 https://github.com/epinna/tplmap $HOME/tools/tplmap >/dev/null 2>&1 || true
-           cd $HOME/tools/tplmap && pip3 install -r requirements.txt -q 2>/dev/null || true
-        fi
-        
-        if should_install "xsstrike"; then
-           git clone --depth 1 https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike >/dev/null 2>&1 || true
-           cd $HOME/tools/xsstrike && pip3 install -r requirements.txt -q || true
-        fi
-        
-        should_install "feroxbuster" && (curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash >/dev/null 2>&1 && sudo mv feroxbuster /usr/local/bin/) || true
-        
-        should_install "gitleaks" && (curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz >/dev/null 2>&1 && sudo mv gitleaks /usr/local/bin/) || true
-        
-        (should_install "feroxbuster" || should_install "ffuf") && sudo mkdir -p /usr/share/wordlists && wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt
-        
-        echo " Tools Installed"
-
-    - name: Execute Scan
+    - name: Run Scan
       env:
         GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -212,261 +211,324 @@ PYEOF
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        TOOLS="$SCAN_TOOLS"
+        TOOL="$TOOL"
         TARGET_RAW="$TARGET"
         SAFE_TARGET="$SAFE_TARGET"
         
-        # Create targets file
-        echo "$TARGET_RAW" | tr ',' '\n' > targets.txt
-        cat targets.txt
+        export PATH=$PATH:$HOME/go/bin:$HOME/.local/bin
         
+        # Create targets file from user input
+        echo "$TARGET_RAW" | tr ',' '\n' > targets.txt
+        echo " Targets: $(cat targets.txt)"
+        
+        # Telegram helper
         tg() { [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" >/dev/null 2>&1 || true; }
         
-        should_run() { [[ "$TOOLS" == "all" ]] || [[ ",$TOOLS," == *",$1,"* ]]; }
-        
-        upload_result() {
-          TOOL=$1
-          FILE=$2
+        # Upload helper (only for this tool's result)
+        upload() {
+          FILE=$1
           if [ -f "$FILE" ] && [ -s "$FILE" ]; then
             python3 drive_upload.py "$FILE" "$SAFE_TARGET" "$TOOL"
+          else
+            echo " No results to upload"
           fi
         }
         
-        export PATH=$PATH:$HOME/go/bin:$HOME/.local/bin
+        # Smart input detection
+        # Check if user gave URL with parameters (contains = or ?)
+        has_params() { [[ "$TARGET_RAW" == *"="* ]] || [[ "$TARGET_RAW" == *"?"* ]]; }
         
-        tg " *Scan Started*\nTarget: \`$TARGET_RAW\`\nTools: \`$TOOLS\`"
-
-        # ===== RECON =====
-        if should_run "subfinder"; then
-           echo " Subfinder..."
-           subfinder -dL targets.txt -all -silent -o output/recon/subfinder.txt
-           cat targets.txt | while read d; do assetfinder --subs-only $d 2>/dev/null >> output/recon/assetfinder.txt; done
-           cat output/recon/*.txt 2>/dev/null | sort -u > output/recon/all_subs.txt
-           SUBCOUNT=$(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0)
-           tg " Subfinder: $SUBCOUNT subs"
-           upload_result "subfinder" "output/recon/all_subs.txt"
-        fi
+        # Check if user gave full URL (starts with http)
+        is_url() { [[ "$TARGET_RAW" == http* ]]; }
         
-        if should_run "amass"; then
-           echo " Amass..."
-           cat targets.txt | while read d; do timeout 1800 amass enum -passive -d $d -o output/recon/amass_${d}.txt 2>/dev/null || true; done
-           tg " Amass Complete"
-           upload_result "amass" "output/recon/amass_*.txt"
-        fi
-
-        # ===== PROBE =====
-        if should_run "httpx"; then
-           echo " HTTPX..."
-           # Use subfinder output if available
-           if [ -s output/recon/all_subs.txt ]; then
-             INPUT="output/recon/all_subs.txt"
-           else
-             INPUT="targets.txt"
-           fi
-           httpx -l $INPUT -ports 80,443,8080,8443 -threads 50 -silent -o output/probe/httpx.txt
-           cat output/probe/httpx.txt | cut -d" " -f1 > output/probe/live.txt
-           LIVECOUNT=$(wc -l < output/probe/live.txt 2>/dev/null || echo 0)
-           tg " HTTPX: $LIVECOUNT live hosts"
-           upload_result "httpx" "output/probe/live.txt"
-        fi
+        # Get best input for param-based tools
+        get_param_input() {
+          if has_params; then
+            echo "targets.txt"  # User gave params directly
+          elif [ -s output/crawl/param_urls.txt ]; then
+            echo "output/crawl/param_urls.txt"  # From previous paramspider
+          elif [ -s output/probe/live.txt ]; then
+            echo "output/probe/live.txt"  # From previous httpx
+          else
+            echo "targets.txt"
+          fi
+        }
         
-        if should_run "naabu"; then
-           echo " Naabu..."
-           if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
-           naabu -l $INPUT -top-ports 100 -silent -o output/ports/naabu.txt
-           tg " Naabu Complete"
-           upload_result "naabu" "output/ports/naabu.txt"
-        fi
-
-        # ===== CRAWL =====
-        if should_run "paramspider"; then
-           echo " ParamSpider..."
-           # Use live hosts if available, else subdomains, else targets
-           if [ -s output/probe/live.txt ]; then
-             INPUT="output/probe/live.txt"
-           elif [ -s output/recon/all_subs.txt ]; then
-             INPUT="output/recon/all_subs.txt"
-           else
-             INPUT="targets.txt"
-           fi
-           
-           echo "ParamSpider Input: $INPUT ($(wc -l < $INPUT) lines)"
-           
-           cat $INPUT | head -100 | while read domain; do
-             # Clean the domain
-             clean=$(echo "$domain" | sed 's|https://||;s|http://||;s|/.*||')
-             echo "  Scanning: $clean"
-             paramspider -d "$clean" --level high -o output/crawl/params_${clean//[^a-zA-Z0-9]/_}.txt 2>/dev/null || true
-           done
-           
-           # Combine all param files
-           cat output/crawl/params_*.txt 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt
-           PARAMCOUNT=$(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0)
-           tg " ParamSpider: $PARAMCOUNT URLs"
-           upload_result "paramspider" "output/crawl/param_urls.txt"
-        fi
+        # Get best input for URL-based tools
+        get_url_input() {
+          if is_url; then
+            echo "targets.txt"
+          elif [ -s output/probe/live.txt ]; then
+            echo "output/probe/live.txt"
+          elif [ -s output/recon/all_subs.txt ]; then
+            echo "output/recon/all_subs.txt"
+          else
+            echo "targets.txt"
+          fi
+        }
         
-        if should_run "arjun"; then
-           echo " Arjun..."
-           if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else INPUT="targets.txt"; fi
-           head -20 $INPUT | while read u; do
-             arjun -u "$u" -oT output/crawl/arjun_temp.txt 2>/dev/null || true
-             cat output/crawl/arjun_temp.txt >> output/crawl/arjun.txt 2>/dev/null || true
-           done
-           tg " Arjun Complete"
-           upload_result "arjun" "output/crawl/arjun.txt"
-        fi
-
-        # ===== VULN =====
-        if should_run "nuclei"; then
-           echo " Nuclei..."
-           nuclei -update-templates -silent >/dev/null 2>&1 || true
-           if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else INPUT="targets.txt"; fi
-           nuclei -l $INPUT -severity medium,high,critical -silent -o output/vulns/nuclei.txt
-           tg " Nuclei Complete"
-           upload_result "nuclei" "output/vulns/nuclei.txt"
-        fi
+        # Get best input for domain-based tools
+        get_domain_input() {
+          if [ -s output/recon/all_subs.txt ]; then
+            echo "output/recon/all_subs.txt"
+          else
+            echo "targets.txt"
+          fi
+        }
         
-        if should_run "nikto"; then
-           echo " Nikto..."
-           cat targets.txt | while read u; do timeout 300 nikto -h "$u" -Tuning 123bde >> output/vulns/nikto.txt 2>/dev/null || true; done
-           tg " Nikto Complete"
-           upload_result "nikto" "output/vulns/nikto.txt"
-        fi
+        tg " *$TOOL Started*\nTarget: \`$TARGET_RAW\`"
         
-        if should_run "ffuf"; then
-           echo " FFUF..."
-           cat targets.txt | while read u; do ffuf -u "$u/FUZZ" -w /usr/share/wordlists/common.txt -mc 200,301,302,403 -s -o output/vulns/ffuf_temp.json 2>/dev/null; cat output/vulns/ffuf_temp.json >> output/vulns/ffuf.json; done
-           tg " FFUF Complete"
-           upload_result "ffuf" "output/vulns/ffuf.json"
-        fi
+        case "$TOOL" in
         
-        if should_run "feroxbuster"; then
-           echo " Feroxbuster..."
-           cat targets.txt | while read u; do timeout 600 feroxbuster -u "$u" -w /usr/share/wordlists/common.txt --no-state --silent >> output/vulns/feroxbuster.txt 2>/dev/null || true; done
-           tg " Feroxbuster Complete"
-           upload_result "feroxbuster" "output/vulns/feroxbuster.txt"
-        fi
-
-        # ===== ATTACK =====
-        if should_run "dalfox"; then
-           echo " Dalfox..."
-           if [ -s output/crawl/param_urls.txt ]; then
-             dalfox file output/crawl/param_urls.txt --silence -o output/xss/dalfox.txt 2>/dev/null
-           else
-             cat targets.txt | dalfox pipe --silence -o output/xss/dalfox.txt 2>/dev/null
-           fi
-           tg " Dalfox Complete"
-           upload_result "dalfox" "output/xss/dalfox.txt"
-        fi
+          subfinder)
+            echo " Running Subfinder..."
+            subfinder -dL targets.txt -all -silent -o output/recon/subfinder.txt
+            cat targets.txt | while read d; do assetfinder --subs-only "$d" >> output/recon/assetfinder.txt 2>/dev/null; done || true
+            cat output/recon/*.txt 2>/dev/null | sort -u > output/recon/all_subs.txt
+            COUNT=$(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0)
+            tg " Subfinder Complete: $COUNT subdomains"
+            upload "output/recon/all_subs.txt"
+            ;;
+            
+          amass)
+            echo " Running Amass..."
+            cat targets.txt | while read d; do
+              timeout 1800 amass enum -passive -d "$d" >> output/recon/amass.txt 2>/dev/null || true
+            done
+            COUNT=$(wc -l < output/recon/amass.txt 2>/dev/null || echo 0)
+            tg " Amass Complete: $COUNT results"
+            upload "output/recon/amass.txt"
+            ;;
+            
+          httpx)
+            INPUT=$(get_domain_input)
+            echo " Running HTTPX on $INPUT..."
+            httpx -l "$INPUT" -ports 80,443,8080,8443 -threads 50 -silent -o output/probe/httpx.txt
+            cat output/probe/httpx.txt | cut -d' ' -f1 > output/probe/live.txt
+            COUNT=$(wc -l < output/probe/live.txt 2>/dev/null || echo 0)
+            tg " HTTPX Complete: $COUNT live hosts"
+            upload "output/probe/live.txt"
+            ;;
+            
+          naabu)
+            INPUT=$(get_domain_input)
+            echo " Running Naabu on $INPUT..."
+            naabu -l "$INPUT" -top-ports 100 -silent -o output/ports/naabu.txt
+            COUNT=$(wc -l < output/ports/naabu.txt 2>/dev/null || echo 0)
+            tg " Naabu Complete: $COUNT open ports"
+            upload "output/ports/naabu.txt"
+            ;;
+            
+          paramspider)
+            INPUT=$(get_url_input)
+            echo " Running ParamSpider on $INPUT..."
+            cat "$INPUT" | head -100 | while read domain; do
+              clean=$(echo "$domain" | sed 's|https://||;s|http://||;s|/.*||')
+              echo "  Scanning: $clean"
+              cd $HOME/tools/paramspider
+              python3 paramspider.py -d "$clean" --level high -o $GITHUB_WORKSPACE/output/crawl/ps_${clean//[^a-zA-Z0-9]/_}.txt 2>/dev/null || true
+              cd $GITHUB_WORKSPACE
+            done
+            cat output/crawl/ps_*.txt 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt
+            COUNT=$(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0)
+            tg " ParamSpider Complete: $COUNT parameter URLs"
+            upload "output/crawl/param_urls.txt"
+            ;;
+            
+          arjun)
+            INPUT=$(get_url_input)
+            echo " Running Arjun on $INPUT..."
+            head -20 "$INPUT" | while read u; do
+              arjun -u "$u" -oT output/crawl/arjun_temp.txt 2>/dev/null || true
+              cat output/crawl/arjun_temp.txt >> output/crawl/arjun.txt 2>/dev/null || true
+            done
+            COUNT=$(wc -l < output/crawl/arjun.txt 2>/dev/null || echo 0)
+            tg " Arjun Complete: $COUNT parameters found"
+            upload "output/crawl/arjun.txt"
+            ;;
+            
+          nuclei)
+            INPUT=$(get_url_input)
+            echo " Running Nuclei on $INPUT..."
+            nuclei -update-templates -silent >/dev/null 2>&1 || true
+            nuclei -l "$INPUT" -severity medium,high,critical -silent -o output/vulns/nuclei.txt
+            COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
+            tg " Nuclei Complete: $COUNT vulnerabilities"
+            upload "output/vulns/nuclei.txt"
+            ;;
+            
+          nikto)
+            echo " Running Nikto..."
+            cat targets.txt | while read u; do
+              timeout 300 nikto -h "$u" -Tuning 123bde >> output/vulns/nikto.txt 2>/dev/null || true
+            done
+            tg " Nikto Complete"
+            upload "output/vulns/nikto.txt"
+            ;;
+            
+          ffuf)
+            echo " Running FFUF..."
+            cat targets.txt | while read u; do
+              ffuf -u "$u/FUZZ" -w /usr/share/wordlists/common.txt -mc 200,301,302,403 -s >> output/vulns/ffuf.txt 2>/dev/null || true
+            done
+            COUNT=$(wc -l < output/vulns/ffuf.txt 2>/dev/null || echo 0)
+            tg " FFUF Complete: $COUNT paths found"
+            upload "output/vulns/ffuf.txt"
+            ;;
+            
+          feroxbuster)
+            echo " Running Feroxbuster..."
+            cat targets.txt | while read u; do
+              timeout 600 feroxbuster -u "$u" -w /usr/share/wordlists/common.txt --no-state --silent >> output/vulns/feroxbuster.txt 2>/dev/null || true
+            done
+            tg " Feroxbuster Complete"
+            upload "output/vulns/feroxbuster.txt"
+            ;;
+            
+          dalfox)
+            INPUT=$(get_param_input)
+            echo " Running Dalfox on $INPUT..."
+            if [ -f "$INPUT" ] && [ -s "$INPUT" ]; then
+              dalfox file "$INPUT" --silence -o output/xss/dalfox.txt 2>/dev/null
+            else
+              echo "$TARGET_RAW" | dalfox pipe --silence -o output/xss/dalfox.txt 2>/dev/null
+            fi
+            COUNT=$(wc -l < output/xss/dalfox.txt 2>/dev/null || echo 0)
+            tg " Dalfox Complete: $COUNT XSS found"
+            upload "output/xss/dalfox.txt"
+            ;;
+            
+          xsstrike)
+            INPUT=$(get_param_input)
+            echo " Running XSStrike on $INPUT..."
+            cd $HOME/tools/xsstrike
+            head -10 "$GITHUB_WORKSPACE/$INPUT" 2>/dev/null | while read u; do
+              timeout 120 python3 xsstrike.py -u "$u" --crawl -l 2 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>/dev/null || true
+            done
+            cd $GITHUB_WORKSPACE
+            tg " XSStrike Complete"
+            upload "output/xss/xsstrike.txt"
+            ;;
+            
+          sqlmap)
+            INPUT=$(get_param_input)
+            echo " Running SQLMap on $INPUT..."
+            head -20 "$INPUT" 2>/dev/null | while read u; do
+              if [[ "$u" == *"="* ]] || [[ "$u" == *"?"* ]]; then
+                echo "  Testing: $u"
+                timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>/dev/null || true
+              fi
+            done
+            tg " SQLMap Complete"
+            upload "output/sql/sqlmap.txt"
+            ;;
+            
+          ghauri)
+            INPUT=$(get_param_input)
+            echo " Running Ghauri on $INPUT..."
+            cd $HOME/tools/ghauri
+            head -10 "$GITHUB_WORKSPACE/$INPUT" 2>/dev/null | while read u; do
+              if [[ "$u" == *"="* ]] || [[ "$u" == *"?"* ]]; then
+                echo "  Testing: $u"
+                timeout 120 python3 ghauri.py -u "$u" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt 2>/dev/null || true
+              fi
+            done
+            cd $GITHUB_WORKSPACE
+            tg " Ghauri Complete"
+            upload "output/sql/ghauri.txt"
+            ;;
+            
+          ssrfmap)
+            INPUT=$(get_param_input)
+            echo " Running SSRFMap on $INPUT..."
+            cd $HOME/tools/ssrfmap
+            head -10 "$GITHUB_WORKSPACE/$INPUT" 2>/dev/null | while read u; do
+              timeout 60 python3 ssrfmap.py -u "$u" -m readfiles >> $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt 2>/dev/null || true
+            done
+            cd $GITHUB_WORKSPACE
+            tg " SSRFMap Complete"
+            upload "output/ssrf/ssrfmap.txt"
+            ;;
+            
+          lfimap)
+            INPUT=$(get_param_input)
+            echo " Running LFIMap on $INPUT..."
+            cd $HOME/tools/lfimap
+            head -20 "$GITHUB_WORKSPACE/$INPUT" 2>/dev/null | while read u; do
+              timeout 120 python3 lfimap.py -U "$u" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>/dev/null || true
+            done
+            cd $GITHUB_WORKSPACE
+            tg " LFIMap Complete"
+            upload "output/lfi/lfimap.txt"
+            ;;
+            
+          openredirex)
+            INPUT=$(get_param_input)
+            echo " Running OpenRedireX on $INPUT..."
+            if [ -f "$INPUT" ] && [ -s "$INPUT" ]; then
+              cat "$INPUT" | python3 $HOME/tools/openredirex/openredirex.py -p "http://evil.com" > output/redirect/openredirex.txt 2>/dev/null || true
+            fi
+            tg " OpenRedireX Complete"
+            upload "output/redirect/openredirex.txt"
+            ;;
+            
+          crlfuzz)
+            INPUT=$(get_url_input)
+            echo " Running CRLFuzz on $INPUT..."
+            cat "$INPUT" | crlfuzz -silent -o output/crlf/crlfuzz.txt 2>/dev/null || true
+            tg " CRLFuzz Complete"
+            upload "output/crlf/crlfuzz.txt"
+            ;;
+            
+          commix)
+            INPUT=$(get_param_input)
+            echo " Running Commix on $INPUT..."
+            head -10 "$INPUT" 2>/dev/null | while read u; do
+              timeout 120 commix -u "$u" --batch >> output/cmdi/commix.txt 2>/dev/null || true
+            done
+            tg " Commix Complete"
+            upload "output/cmdi/commix.txt"
+            ;;
+            
+          tplmap)
+            INPUT=$(get_param_input)
+            echo " Running Tplmap on $INPUT..."
+            cd $HOME/tools/tplmap
+            head -10 "$GITHUB_WORKSPACE/$INPUT" 2>/dev/null | while read u; do
+              timeout 120 python3 tplmap.py -u "$u" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>/dev/null || true
+            done
+            cd $GITHUB_WORKSPACE
+            tg " Tplmap Complete"
+            upload "output/ssti/tplmap.txt"
+            ;;
+            
+          subzy)
+            INPUT=$(get_domain_input)
+            echo " Running Subzy on $INPUT..."
+            subzy run --targets "$INPUT" --hide_fails --output output/takeover/subzy.txt 2>/dev/null || true
+            tg " Subzy Complete"
+            upload "output/takeover/subzy.txt"
+            ;;
+            
+          gitleaks)
+            echo " Running Gitleaks..."
+            gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null || true
+            tg " Gitleaks Complete"
+            upload "output/secrets/gitleaks.txt"
+            ;;
+            
+          *)
+            echo " Unknown tool: $TOOL"
+            tg " Unknown tool: $TOOL"
+            ;;
+        esac
         
-        if should_run "xsstrike"; then
-           echo " XSStrike..."
-           cd $HOME/tools/xsstrike 2>/dev/null || true
-           if [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ]; then INPUT=$GITHUB_WORKSPACE/output/crawl/param_urls.txt; else INPUT=$GITHUB_WORKSPACE/targets.txt; fi
-           head -10 $INPUT | while read u; do timeout 120 python3 xsstrike.py -u "$u" --crawl -l 2 >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>/dev/null || true; done
-           cd $GITHUB_WORKSPACE
-           tg " XSStrike Complete"
-           upload_result "xsstrike" "output/xss/xsstrike.txt"
-        fi
-        
-        if should_run "sqlmap"; then
-           echo " SQLMap..."
-           if [ -s output/crawl/param_urls.txt ]; then INPUT="output/crawl/param_urls.txt"; else INPUT="targets.txt"; fi
-           head -20 $INPUT | while read u; do
-             if [[ "$u" == *"?"* ]] || [[ "$u" == *"="* ]]; then
-               timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>/dev/null || true
-             fi
-           done
-           tg " SQLMap Complete"
-           upload_result "sqlmap" "output/sql/sqlmap.txt"
-        fi
-        
-        if should_run "ghauri"; then
-           echo " Ghauri..."
-           if [ -s output/crawl/param_urls.txt ]; then INPUT="output/crawl/param_urls.txt"; else INPUT="targets.txt"; fi
-           head -10 $INPUT | while read u; do
-             timeout 120 ghauri -u "$u" --batch >> output/sql/ghauri.txt 2>/dev/null || true
-           done
-           tg " Ghauri Complete"
-           upload_result "ghauri" "output/sql/ghauri.txt"
-        fi
-        
-        if should_run "ssrfmap"; then
-           echo " SSRFMap..."
-           cd $HOME/tools/ssrfmap 2>/dev/null || true
-           if [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ]; then INPUT=$GITHUB_WORKSPACE/output/crawl/param_urls.txt; else INPUT=$GITHUB_WORKSPACE/targets.txt; fi
-           head -10 $INPUT | while read u; do timeout 60 python3 ssrfmap.py -u "$u" -m readfiles >> $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt 2>/dev/null || true; done
-           cd $GITHUB_WORKSPACE
-           tg " SSRFMap Complete"
-           upload_result "ssrfmap" "output/ssrf/ssrfmap.txt"
-        fi
-        
-        if should_run "lfimap"; then
-           echo " LFIMap..."
-           cd $HOME/tools/lfimap 2>/dev/null || true
-           if [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ]; then INPUT=$GITHUB_WORKSPACE/output/crawl/param_urls.txt; else INPUT=$GITHUB_WORKSPACE/targets.txt; fi
-           head -20 $INPUT | while read u; do timeout 120 python3 lfimap.py -U "$u" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>/dev/null || true; done
-           cd $GITHUB_WORKSPACE
-           tg " LFIMap Complete"
-           upload_result "lfimap" "output/lfi/lfimap.txt"
-        fi
-        
-        if should_run "openredirex"; then
-           echo " OpenRedireX..."
-           if [ -s output/crawl/param_urls.txt ]; then
-             cat output/crawl/param_urls.txt | python3 $HOME/tools/openredirex/openredirex.py -p "http://evil.com" > output/redirect/openredirex.txt 2>/dev/null || true
-           fi
-           tg " OpenRedireX Complete"
-           upload_result "openredirex" "output/redirect/openredirex.txt"
-        fi
-        
-        if should_run "crlfuzz"; then
-           echo " CRLFuzz..."
-           cat targets.txt | crlfuzz -silent -o output/crlf/crlfuzz.txt 2>/dev/null || true
-           tg " CRLFuzz Complete"
-           upload_result "crlfuzz" "output/crlf/crlfuzz.txt"
-        fi
-        
-        if should_run "commix"; then
-           echo " Commix..."
-           if [ -s output/crawl/param_urls.txt ]; then INPUT="output/crawl/param_urls.txt"; else INPUT="targets.txt"; fi
-           head -10 $INPUT | while read u; do timeout 120 commix -u "$u" --batch >> output/cmdi/commix.txt 2>/dev/null || true; done
-           tg " Commix Complete"
-           upload_result "commix" "output/cmdi/commix.txt"
-        fi
-        
-        if should_run "tplmap"; then
-           echo " Tplmap..."
-           cd $HOME/tools/tplmap 2>/dev/null || true
-           if [ -s $GITHUB_WORKSPACE/output/crawl/param_urls.txt ]; then INPUT=$GITHUB_WORKSPACE/output/crawl/param_urls.txt; else INPUT=$GITHUB_WORKSPACE/targets.txt; fi
-           head -10 $INPUT | while read u; do timeout 120 python3 tplmap.py -u "$u" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>/dev/null || true; done
-           cd $GITHUB_WORKSPACE
-           tg " Tplmap Complete"
-           upload_result "tplmap" "output/ssti/tplmap.txt"
-        fi
-        
-        if should_run "subzy"; then
-           echo " Subzy..."
-           if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
-           subzy run --targets $INPUT --hide_fails --output output/takeover/subzy.txt 2>/dev/null || true
-           tg " Subzy Complete"
-           upload_result "subzy" "output/takeover/subzy.txt"
-        fi
-        
-        if should_run "gitleaks"; then
-           echo " Gitleaks..."
-           gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null || true
-           tg " Gitleaks Complete"
-           upload_result "gitleaks" "output/secrets/gitleaks.txt"
-        fi
-        
-        tg " *Scan Complete!*\nTarget: \`$TARGET_RAW\`"
+        tg " *$TOOL Finished*"
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: results-${{ env.SCAN_TOOLS }}-${{ github.run_id }}
+        name: ${{ env.TOOL }}-${{ github.run_id }}
         path: output/
         retention-days: 90
