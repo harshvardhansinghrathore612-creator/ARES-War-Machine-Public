@@ -12,6 +12,10 @@ on:
         description: 'Target domain or URL'
         required: true
         type: string
+      previous_run_id:
+        description: 'Previous Run ID for chaining'
+        required: false
+        type: string
 
 env:
   GOPATH: /home/runner/go
