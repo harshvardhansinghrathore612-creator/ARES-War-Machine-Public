@@ -174,18 +174,21 @@ jobs:
             
           # === CRAWL ===
           paramspider)
-            # FIXED: Use new paramspider command directly
-            if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt
-            elif [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt
-            else echo "$DOM" > targets.txt; IN=targets.txt; fi
+            # FIXED: ParamSpider with list input
+            if [ -s output/probe/live.txt ]; then 
+              cp output/probe/live.txt output/crawl/input_list.txt
+            elif [ -s output/recon/all_subs.txt ]; then 
+              cat output/recon/all_subs.txt | head -50 | sed 's|^|http://|' > output/crawl/input_list.txt
+            else 
+              echo "http://$DOM" > output/crawl/input_list.txt
+            fi
             
-            mkdir -p output/crawl/ps_out
-            cat "$IN" | head -50 | while read line; do
-              d=$(echo "$line" | sed 's|https\?://||;s|/.*||')
-              echo "ParamSpider: $d"
-              paramspider -d "$d" --level high -o output/crawl/ps_out/${d//[^a-zA-Z0-9]/_}.txt 2>/dev/null || true
-            done
-            cat output/crawl/ps_out/*.txt 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt
+            echo "Running ParamSpider on $(wc -l <output/crawl/input_list.txt) URLs..."
+            paramspider -l output/crawl/input_list.txt --level high --exclude woff,css,js,png,svg,jpg,jpeg,gif,ico,woff2,ttf,eot 2>&1 | tee output/crawl/paramspider.log || true
+            
+            # ParamSpider outputs to results/ by default
+            find results/ -name "*.txt" -exec cat {} \; 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt || echo "" > output/crawl/param_urls.txt
+            
             tg "ParamSpider: $(wc -l <output/crawl/param_urls.txt) URLs"
             up output/crawl/param_urls.txt
             ;;
