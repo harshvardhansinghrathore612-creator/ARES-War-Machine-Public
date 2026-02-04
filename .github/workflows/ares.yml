@@ -49,12 +49,10 @@ jobs:
         gh run download ${{ inputs.previous_run_id }} -D prev_data || true
         find prev_data -name "*.txt" | while read f; do
           base=$(basename "$f")
-          echo "Found: $f"
           if [[ "$base" == "all_subs.txt" ]] || [[ "$base" == "subfinder.txt" ]]; then cp "$f" output/recon/; fi
           if [[ "$base" == "live.txt" ]] || [[ "$base" == "httpx.txt" ]]; then cp "$f" output/probe/; fi
           if [[ "$base" == "param_urls.txt" ]]; then cp "$f" output/crawl/; fi
         done
-        echo "=== RESTORED FILES ==="
         find output -name "*.txt" -exec wc -l {} \; 2>/dev/null || true
 
     - name: Install
@@ -119,22 +117,18 @@ jobs:
           httpx)
             if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
             echo "Using: $INPUT ($(wc -l < $INPUT) lines)"
-            httpx -l "$INPUT" -ports 80,443,8080,8443 -threads 50 -o output/probe/httpx.txt
+            httpx -l "$INPUT" -ports 80,443,8080,8443 -threads 100 -o output/probe/httpx.txt
             cat output/probe/httpx.txt | awk '{print $1}' > output/probe/live.txt
             COUNT=$(wc -l < output/probe/live.txt)
             echo "RESULT: $COUNT live hosts"
             tg " HTTPX: $COUNT live"
             ;;
           paramspider)
-            # Use live hosts from previous run OR subdomains OR target
             if [ -s output/probe/live.txt ]; then
-              echo "Using live hosts from previous scan"
               cat output/probe/live.txt | sed 's|https\?://||;s|/.*||;s|:.*||' | sort -u > domains.txt
             elif [ -s output/recon/all_subs.txt ]; then
-              echo "Using subdomains from previous scan"
               cp output/recon/all_subs.txt domains.txt
             else
-              echo "Using target domain"
               echo "$DOM" > domains.txt
             fi
             echo "Scanning $(wc -l < domains.txt) domains"
@@ -142,7 +136,6 @@ jobs:
               echo "ParamSpider: $d"
               paramspider -d "$d" 2>&1 || true
             done
-            # Copy ALL results (not just filtered ones)
             mkdir -p output/crawl
             cat results/*.txt 2>/dev/null > output/crawl/param_urls.txt || true
             COUNT=$(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0)
@@ -152,7 +145,11 @@ jobs:
             ;;
           nuclei)
             if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else echo "https://$TGT" > targets.txt; INPUT="targets.txt"; fi
-            nuclei -l "$INPUT" -severity medium,high,critical -o output/vulns/nuclei.txt
+            echo "Nuclei Input: $INPUT"
+            cat "$INPUT"
+            echo "---"
+            # REMOVED TIMEOUT FLAGS entirely
+            nuclei -l "$INPUT" -severity medium,high,critical -o output/vulns/nuclei.txt -retries 2 -v
             COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
             echo "RESULT: $COUNT vulnerabilities"
             tg " Nuclei: $COUNT vulns"
@@ -161,13 +158,13 @@ jobs:
             if [[ "$TGT" == *"="* ]]; then
               echo "$TGT" | tr ',' '\n' | while read url; do
                 echo "Testing: $url"
-                timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
+                python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
               done
             elif [ -s output/crawl/param_urls.txt ]; then
               echo "Using param URLs from previous scan"
-              head -15 output/crawl/param_urls.txt | while read url; do
+              head -50 output/crawl/param_urls.txt | while read url; do
                 echo "Testing: $url"
-                timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
+                python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
               done
             else
               echo "No parameter URLs found"
@@ -178,21 +175,18 @@ jobs:
             if [[ "$TGT" == *"="* ]]; then
               echo "$TGT" | tr ',' '\n' | dalfox pipe -o output/xss/dalfox.txt
             elif [ -s output/crawl/param_urls.txt ]; then
-              echo "Using param URLs from previous scan"
-              head -50 output/crawl/param_urls.txt | dalfox pipe -o output/xss/dalfox.txt
-            else
-              echo "No parameter URLs found"
+              head -100 output/crawl/param_urls.txt | dalfox pipe -o output/xss/dalfox.txt
             fi
             tg " Dalfox done"
             ;;
           naabu)
             if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
-            naabu -l "$INPUT" -top-ports 100 -o output/ports/naabu.txt
+            naabu -l "$INPUT" -top-ports 1000 -o output/ports/naabu.txt
             tg " Naabu done"
             ;;
           nikto)
             URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
-            timeout 600 nikto -h "$URL" -Tuning 123bde > output/vulns/nikto.txt 2>&1 || true
+            nikto -h "$URL" -Tuning 123bde > output/vulns/nikto.txt 2>&1 || true
             tg " Nikto done"
             ;;
           ffuf)
@@ -238,48 +232,21 @@ jobs:
         tool = os.environ.get("TOOL", "unknown")
         target = os.environ.get("SAFE_TARGET", "target")
         folder_id = os.environ.get("GDRIVE_FOLDER_ID", "")
-        
-        if not folder_id:
-            print("No GDRIVE_FOLDER_ID set")
-            sys.exit(0)
+        if not folder_id: sys.exit(0)
             
         try:
-            creds = Credentials(
-                None,
-                refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=os.environ.get("GOOGLE_CLIENT_ID"),
-                client_secret=os.environ.get("GOOGLE_CLIENT_SECRET")
-            )
+            creds = Credentials(None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"), token_uri="https://oauth2.googleapis.com/token", client_id=os.environ.get("GOOGLE_CLIENT_ID"), client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"))
             service = build("drive", "v3", credentials=creds)
             
-            # Create target folder
-            target_folder = service.files().list(
-                q=f"name='{target}' and '{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-                fields="files(id)"
-            ).execute().get("files", [])
+            # Target Folder
+            target_folder = service.files().list(q=f"name='{target}' and '{folder_id}' in parents and trashed=false", fields="files(id)").execute().get("files", [])
+            target_id = target_folder[0]["id"] if target_folder else service.files().create(body={"name": target, "mimeType": "application/vnd.google-apps.folder", "parents": [folder_id]}).execute()["id"]
             
-            if target_folder:
-                target_folder_id = target_folder[0]["id"]
-            else:
-                target_folder_id = service.files().create(
-                    body={"name": target, "mimeType": "application/vnd.google-apps.folder", "parents": [folder_id]}
-                ).execute()["id"]
+            # Tool Folder
+            tool_folder = service.files().list(q=f"name='{tool}' and '{target_id}' in parents and trashed=false", fields="files(id)").execute().get("files", [])
+            tool_id = tool_folder[0]["id"] if tool_folder else service.files().create(body={"name": tool, "mimeType": "application/vnd.google-apps.folder", "parents": [target_id]}).execute()["id"]
             
-            # Create tool folder
-            tool_folder = service.files().list(
-                q=f"name='{tool}' and '{target_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-                fields="files(id)"
-            ).execute().get("files", [])
-            
-            if tool_folder:
-                tool_folder_id = tool_folder[0]["id"]
-            else:
-                tool_folder_id = service.files().create(
-                    body={"name": tool, "mimeType": "application/vnd.google-apps.folder", "parents": [target_folder_id]}
-                ).execute()["id"]
-            
-            # Upload ONLY this tool's output files
+            # Files to upload
             tool_files = {
                 "subfinder": ["output/recon/subfinder.txt", "output/recon/all_subs.txt"],
                 "httpx": ["output/probe/httpx.txt", "output/probe/live.txt"],
@@ -295,33 +262,19 @@ jobs:
                 "gitleaks": ["output/secrets/gitleaks.txt"],
             }
             
-            files_to_upload = tool_files.get(tool, [])
-            
-            for filepath in files_to_upload:
+            for filepath in tool_files.get(tool, []):
                 if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                     filename = os.path.basename(filepath)
                     media = MediaFileUpload(filepath, resumable=True)
-                    
-                    # Check if file exists and update, otherwise create
-                    existing = service.files().list(
-                        q=f"name='{filename}' and '{tool_folder_id}' in parents and trashed=false",
-                        fields="files(id)"
-                    ).execute().get("files", [])
-                    
+                    existing = service.files().list(q=f"name='{filename}' and '{tool_id}' in parents and trashed=false", fields="files(id)").execute().get("files", [])
                     if existing:
                         service.files().update(fileId=existing[0]["id"], media_body=media).execute()
                         print(f"Updated: {filename}")
                     else:
-                        service.files().create(
-                            body={"name": filename, "parents": [tool_folder_id]},
-                            media_body=media
-                        ).execute()
+                        service.files().create(body={"name": filename, "parents": [tool_id]}, media_body=media).execute()
                         print(f"Uploaded: {filename}")
                         
-            print(f"Drive upload complete for {tool}")
-            
-        except Exception as e:
-            print(f"Drive upload error: {e}")
+        except Exception as e: print(f"Drive upload error: {e}")
         PYTHON_SCRIPT
 
     - uses: actions/upload-artifact@v4
