@@ -1,0 +1,29 @@
+name: ARES - Subzy Scanner
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        required: true
+      previous_run_id:
+        required: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-go@v2
+      with: { go-version: '1.21' }
+    - run: go install -v github.com/LukaSikic/subzy@latest
+    - run: pip3 install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+    - name: Run Subzy
+      run: |
+        subzy run --target "${{ github.event.inputs.target }}" --hide_fails > output/takeover/subzy.txt
+    - run: python3 drive_upload.py "subzy" "output/takeover/subzy.txt"
+      env:
+        GOOGLE_CLIENT_EMAIL: ${{ secrets.GOOGLE_CLIENT_EMAIL }}
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+        GOOGLE_PRIVATE_KEY_ID: ${{ secrets.GOOGLE_PRIVATE_KEY_ID }}
+        GOOGLE_PROJECT_ID: ${{ secrets.GOOGLE_PROJECT_ID }}
+        GOOGLE_CLIENT_X509_CERT_URL: ${{ secrets.GOOGLE_CLIENT_X509_CERT_URL }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
