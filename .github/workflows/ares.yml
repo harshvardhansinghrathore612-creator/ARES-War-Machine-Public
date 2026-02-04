@@ -37,52 +37,34 @@ jobs:
         echo "TOOL=${{ github.event.inputs.scan_type }}" >> $GITHUB_ENV
         echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
         mkdir -p $HOME/go/bin $HOME/tools
         SAFE=$(echo "${{ github.event.inputs.target }}" | sed 's/[^a-zA-Z0-9]/_/g' | cut -c1-40)
         echo "SAFE_TARGET=$SAFE" >> $GITHUB_ENV
-        echo "=== SETUP COMPLETE ==="
-        echo "Tool: ${{ github.event.inputs.scan_type }}"
-        echo "Target: ${{ github.event.inputs.target }}"
-        echo "Previous Run ID: ${{ github.event.inputs.previous_run_id }}"
 
     - name: Restore Previous Data
       if: inputs.previous_run_id != ''
       run: |
         echo "=== RESTORING DATA FROM RUN: ${{ inputs.previous_run_id }} ==="
-        gh run download ${{ inputs.previous_run_id }} -D prev_data || echo "Failed to download artifacts"
-        echo "=== DOWNLOADED FILES ==="
-        find prev_data -type f 2>/dev/null || echo "No files found"
-        echo "=== COPYING FILES ==="
-        # Copy all txt files maintaining structure
+        gh run download ${{ inputs.previous_run_id }} -D prev_data || echo "Failed to download"
         find prev_data -name "*.txt" | while read f; do
-          # Get the relative path parts
           base=$(basename "$f")
-          dir=$(dirname "$f")
           echo "Found: $f"
-          # Copy to appropriate output folder based on filename
           if [[ "$base" == "all_subs.txt" ]] || [[ "$base" == "subfinder.txt" ]] || [[ "$base" == "amass.txt" ]]; then
-            cp "$f" output/recon/ && echo "Copied to output/recon/"
+            cp "$f" output/recon/
           elif [[ "$base" == "live.txt" ]] || [[ "$base" == "httpx.txt" ]]; then
-            cp "$f" output/probe/ && echo "Copied to output/probe/"
+            cp "$f" output/probe/
           elif [[ "$base" == "param_urls.txt" ]] || [[ "$base" == "arjun.txt" ]]; then
-            cp "$f" output/crawl/ && echo "Copied to output/crawl/"
+            cp "$f" output/crawl/
           elif [[ "$base" == "naabu.txt" ]]; then
-            cp "$f" output/ports/ && echo "Copied to output/ports/"
+            cp "$f" output/ports/
           fi
         done
-        echo "=== FILES IN OUTPUT ==="
-        find output -type f -name "*.txt" 2>/dev/null
-        echo "=== FILE CONTENTS ==="
-        for f in output/recon/all_subs.txt output/probe/live.txt output/crawl/param_urls.txt; do
-          if [ -f "$f" ]; then
-            echo "--- $f ($(wc -l < $f) lines) ---"
-            head -3 "$f"
-          fi
-        done
+        echo "=== FILES RESTORED ==="
+        find output -name "*.txt" -exec wc -l {} \;
 
     - name: Install Dependencies
       run: |
-        echo "=== INSTALLING SYSTEM DEPS ==="
         sudo apt-get update -qq
         sudo apt-get install -y -qq python3-pip curl wget git libpcap-dev nikto jq
         pip3 install -q google-api-python-client google-auth-httplib2 google-auth-oauthlib
@@ -90,19 +72,17 @@ jobs:
     - name: Install Tool
       run: |
         T="${{ github.event.inputs.scan_type }}"
-        echo "=== INSTALLING: $T ==="
+        echo "Installing: $T"
         case "$T" in
           subfinder) 
             go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
             go install github.com/tomnomnom/assetfinder@latest
-            echo "Subfinder installed: $(which subfinder)"
             ;;
           amass) 
             go install github.com/owasp-amass/amass/v4/...@latest || true
             ;;
           httpx) 
             go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-            echo "HTTPX installed: $(which httpx)"
             ;;
           naabu) 
             go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
@@ -132,10 +112,8 @@ jobs:
             go install github.com/PentestPad/subzy@latest
             ;;
           paramspider) 
-            git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider
-            cd $HOME/tools/paramspider && pip3 install .
-            echo "ParamSpider installed"
-            ls -la $HOME/tools/paramspider/
+            pip3 install paramspider
+            which paramspider || echo "paramspider not in PATH"
             ;;
           arjun) 
             pip3 install arjun
@@ -144,8 +122,7 @@ jobs:
             git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap
             ;;
           ghauri) 
-            git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri
-            cd $HOME/tools/ghauri && pip3 install -r requirements.txt
+            pip3 install ghauri
             ;;
           xsstrike) 
             git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike
@@ -160,7 +137,7 @@ jobs:
             cd $HOME/tools/lfimap && pip3 install -r requirements.txt
             ;;
           openredirex) 
-            git clone https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex
+            pip3 install openredirex
             ;;
           commix) 
             pip3 install commix
@@ -174,7 +151,6 @@ jobs:
             sudo mv gitleaks /usr/local/bin/
             ;;
         esac
-        echo "=== INSTALLATION COMPLETE ==="
 
     - name: Run Scan
       env:
@@ -186,20 +162,15 @@ jobs:
         DOM=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
         
         echo "=========================================="
-        echo "RUNNING: $T"
-        echo "TARGET: $TGT"
-        echo "DOMAIN: $DOM"
+        echo "RUNNING: $T on $TGT (domain: $DOM)"
         echo "=========================================="
         
-        # Check what input files we have
-        echo "=== AVAILABLE INPUT FILES ==="
+        # Check available input files
         [ -f output/recon/all_subs.txt ] && echo "all_subs.txt: $(wc -l < output/recon/all_subs.txt) lines"
         [ -f output/probe/live.txt ] && echo "live.txt: $(wc -l < output/probe/live.txt) lines"
         [ -f output/crawl/param_urls.txt ] && echo "param_urls.txt: $(wc -l < output/crawl/param_urls.txt) lines"
         
-        # Put target in file
         echo "$TGT" | tr ',' '\n' > targets.txt
-        echo "targets.txt: $(wc -l < targets.txt) lines"
         
         tg() { 
           [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
@@ -210,327 +181,207 @@ jobs:
         
         case "$T" in
           subfinder)
-            echo "Running: subfinder -d $DOM -all -o output/recon/subfinder.txt"
             subfinder -d "$DOM" -all -o output/recon/subfinder.txt
             assetfinder --subs-only "$DOM" >> output/recon/assetfinder.txt 2>/dev/null || true
             cat output/recon/*.txt 2>/dev/null | sort -u > output/recon/all_subs.txt
-            COUNT=$(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0)
-            echo "RESULT: $COUNT subdomains found"
+            COUNT=$(wc -l < output/recon/all_subs.txt)
+            echo "RESULT: $COUNT subdomains"
             tg " Subfinder: $COUNT subdomains"
             ;;
             
           amass)
-            echo "Running: amass enum -passive -d $DOM"
             timeout 1800 amass enum -passive -d "$DOM" -o output/recon/amass.txt || true
-            COUNT=$(wc -l < output/recon/amass.txt 2>/dev/null || echo 0)
-            echo "RESULT: $COUNT subdomains found"
-            tg " Amass: $COUNT subdomains"
+            tg " Amass done"
             ;;
             
           httpx)
-            # Determine input
             if [ -s output/recon/all_subs.txt ]; then
               INPUT="output/recon/all_subs.txt"
-              echo "Using previous subfinder data: $(wc -l < $INPUT) subdomains"
             else
               echo "$TGT" | tr ',' '\n' > targets.txt
               INPUT="targets.txt"
-              echo "Using direct target input"
             fi
-            echo "Running: httpx -l $INPUT -ports 80,443,8080,8443 -threads 50"
-            cat "$INPUT" | head -5
+            echo "Input: $INPUT ($(wc -l < $INPUT) lines)"
             httpx -l "$INPUT" -ports 80,443,8080,8443 -threads 50 -o output/probe/httpx.txt
             cat output/probe/httpx.txt | awk '{print $1}' > output/probe/live.txt
-            COUNT=$(wc -l < output/probe/live.txt 2>/dev/null || echo 0)
-            echo "RESULT: $COUNT live hosts found"
-            cat output/probe/live.txt | head -5
+            COUNT=$(wc -l < output/probe/live.txt)
+            echo "RESULT: $COUNT live hosts"
             tg " HTTPX: $COUNT live hosts"
             ;;
             
           naabu)
-            if [ -s output/recon/all_subs.txt ]; then
-              INPUT="output/recon/all_subs.txt"
-            else
-              echo "$TGT" | tr ',' '\n' > targets.txt
-              INPUT="targets.txt"
-            fi
-            echo "Running: naabu -l $INPUT -top-ports 100"
+            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
             naabu -l "$INPUT" -top-ports 100 -o output/ports/naabu.txt
-            COUNT=$(wc -l < output/ports/naabu.txt 2>/dev/null || echo 0)
-            echo "RESULT: $COUNT open ports found"
-            tg " Naabu: $COUNT open ports"
+            tg " Naabu done"
             ;;
             
           paramspider)
-            # Determine input - prefer live hosts, then subdomains, then direct
             if [ -s output/probe/live.txt ]; then
-              INPUT="output/probe/live.txt"
-              echo "Using live hosts: $(wc -l < $INPUT) URLs"
+              echo "Using live hosts"
+              cat output/probe/live.txt | head -30 | while read url; do
+                d=$(echo "$url" | sed 's|https\?://||;s|/.*||;s|:.*||')
+                echo "Scanning: $d"
+                paramspider -d "$d" -o output/crawl/ps_${d}.txt 2>&1 || true
+              done
             elif [ -s output/recon/all_subs.txt ]; then
-              INPUT="output/recon/all_subs.txt"
-              echo "Using subdomains: $(wc -l < $INPUT) domains"
+              echo "Using subdomains"
+              cat output/recon/all_subs.txt | head -30 | while read d; do
+                echo "Scanning: $d"
+                paramspider -d "$d" -o output/crawl/ps_${d}.txt 2>&1 || true
+              done
             else
-              echo "$DOM" > targets.txt
-              INPUT="targets.txt"
-              echo "Using direct domain: $DOM"
+              echo "Scanning: $DOM"
+              paramspider -d "$DOM" -o output/crawl/ps_${DOM}.txt 2>&1 || true
             fi
-            
-            mkdir -p output/crawl/ps_results
-            echo "=== PARAMSPIDER SCANNING ==="
-            cat "$INPUT" | head -30 | while read line; do
-              # Extract domain from URL
-              domain=$(echo "$line" | sed 's|https\?://||;s|/.*||;s|:.*||')
-              if [ -n "$domain" ]; then
-                echo "Scanning: $domain"
-                cd $HOME/tools/paramspider
-                python3 paramspider.py -d "$domain" --level high -o $GITHUB_WORKSPACE/output/crawl/ps_results/${domain}.txt 2>&1 || echo "Failed for $domain"
-                cd $GITHUB_WORKSPACE
-              fi
-            done
-            
-            # Combine all results
-            cat output/crawl/ps_results/*.txt 2>/dev/null | grep -E "^https?://" | grep "=" | sort -u > output/crawl/param_urls.txt
+            cat output/crawl/ps_*.txt 2>/dev/null | grep -E "^https?://" | grep "=" | sort -u > output/crawl/param_urls.txt
             COUNT=$(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0)
-            echo "RESULT: $COUNT parameter URLs found"
+            echo "RESULT: $COUNT parameter URLs"
             cat output/crawl/param_urls.txt | head -10
             tg " ParamSpider: $COUNT parameter URLs"
             ;;
             
           arjun)
-            if [ -s output/probe/live.txt ]; then
-              INPUT="output/probe/live.txt"
-            else
-              echo "https://$DOM" > targets.txt
-              INPUT="targets.txt"
-            fi
-            echo "Running arjun on $(wc -l < $INPUT) URLs"
-            head -20 "$INPUT" | while read url; do
-              echo "Scanning: $url"
-              arjun -u "$url" -oT output/crawl/arjun.txt 2>&1 || true
-            done
+            if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else echo "https://$DOM" > targets.txt; INPUT="targets.txt"; fi
+            head -20 "$INPUT" | while read url; do arjun -u "$url" -oT output/crawl/arjun.txt 2>&1 || true; done
             tg " Arjun done"
             ;;
             
           nuclei)
-            if [ -s output/probe/live.txt ]; then
-              INPUT="output/probe/live.txt"
-              echo "Using live hosts: $(wc -l < $INPUT) URLs"
-            else
-              echo "https://$TGT" > targets.txt
-              INPUT="targets.txt"
-            fi
-            echo "Running: nuclei -l $INPUT -severity medium,high,critical"
+            if [ -s output/probe/live.txt ]; then INPUT="output/probe/live.txt"; else echo "https://$TGT" > targets.txt; INPUT="targets.txt"; fi
             nuclei -l "$INPUT" -severity medium,high,critical -o output/vulns/nuclei.txt
             COUNT=$(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0)
-            echo "RESULT: $COUNT vulnerabilities found"
             tg " Nuclei: $COUNT vulnerabilities"
             ;;
             
           nikto)
-            URL="$TGT"
-            [[ "$URL" != http* ]] && URL="https://$TGT"
-            echo "Running: nikto -h $URL"
+            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
             timeout 600 nikto -h "$URL" -Tuning 123bde > output/vulns/nikto.txt 2>&1 || true
             tg " Nikto done"
             ;;
             
           ffuf)
-            URL="$TGT"
-            [[ "$URL" != http* ]] && URL="https://$TGT"
-            echo "Running: ffuf -u ${URL}/FUZZ"
+            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
             ffuf -u "${URL}/FUZZ" -w /usr/share/wordlists/common.txt -mc 200,301,302,403 -o output/vulns/ffuf.json 2>&1 || true
             tg " FFUF done"
             ;;
             
           feroxbuster)
-            URL="$TGT"
-            [[ "$URL" != http* ]] && URL="https://$TGT"
-            echo "Running: feroxbuster -u $URL"
+            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
             timeout 900 feroxbuster -u "$URL" -w /usr/share/wordlists/common.txt -o output/vulns/feroxbuster.txt 2>&1 || true
             tg " Feroxbuster done"
             ;;
             
           dalfox)
-            # Check if target has params
-            if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
-              echo "Direct param URL provided"
+            if [[ "$TGT" == *"="* ]]; then
               echo "$TGT" | tr ',' '\n' | dalfox pipe -o output/xss/dalfox.txt
             elif [ -s output/crawl/param_urls.txt ]; then
-              echo "Using param_urls.txt: $(wc -l < output/crawl/param_urls.txt) URLs"
               dalfox file output/crawl/param_urls.txt -o output/xss/dalfox.txt
             else
-              echo "ERROR: Dalfox needs URLs with parameters!"
-              echo "Run ParamSpider first or provide URL with ?param=value"
-              tg " Dalfox: No parameter URLs available"
-              exit 0
+              echo "ERROR: Dalfox needs URLs with parameters"
+              tg " Dalfox: No parameter URLs"
             fi
-            COUNT=$(wc -l < output/xss/dalfox.txt 2>/dev/null || echo 0)
-            echo "RESULT: $COUNT XSS found"
-            tg " Dalfox: $COUNT XSS vulnerabilities"
+            tg " Dalfox done"
             ;;
             
           xsstrike)
-            if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
-              echo "Direct param URL provided"
-              cd $HOME/tools/xsstrike
-              timeout 600 python3 xsstrike.py -u "$TGT" --crawl -l 2 > $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
-              cd $GITHUB_WORKSPACE
+            if [[ "$TGT" == *"="* ]]; then
+              cd $HOME/tools/xsstrike && timeout 600 python3 xsstrike.py -u "$TGT" --crawl -l 2 > $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
             elif [ -s output/crawl/param_urls.txt ]; then
-              echo "Using param_urls.txt"
               head -10 output/crawl/param_urls.txt | while read url; do
-                echo "Scanning: $url"
-                cd $HOME/tools/xsstrike
-                timeout 120 python3 xsstrike.py -u "$url" >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
-                cd $GITHUB_WORKSPACE
+                cd $HOME/tools/xsstrike && timeout 120 python3 xsstrike.py -u "$url" >> $GITHUB_WORKSPACE/output/xss/xsstrike.txt 2>&1 || true
               done
-            else
-              echo "ERROR: XSStrike needs URLs with parameters!"
-              tg " XSStrike: No parameter URLs"
             fi
+            cd $GITHUB_WORKSPACE
             tg " XSStrike done"
             ;;
             
           sqlmap)
-            if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
-              echo "Direct param URL: $TGT"
+            if [[ "$TGT" == *"="* ]]; then
               echo "$TGT" | tr ',' '\n' | while read url; do
-                echo "Testing: $url"
                 timeout 300 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
               done
             elif [ -s output/crawl/param_urls.txt ]; then
-              echo "Using param_urls.txt: $(wc -l < output/crawl/param_urls.txt) URLs"
               head -15 output/crawl/param_urls.txt | while read url; do
-                echo "Testing: $url"
                 timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$url" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>&1 || true
               done
-            else
-              echo "ERROR: SQLMap needs URLs with parameters!"
-              tg " SQLMap: No parameter URLs"
             fi
             tg " SQLMap done"
             ;;
             
           ghauri)
-            if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
-              echo "Direct param URL: $TGT"
-              cd $HOME/tools/ghauri
-              timeout 600 python3 ghauri.py -u "$TGT" --batch > $GITHUB_WORKSPACE/output/sql/ghauri.txt 2>&1 || true
-              cd $GITHUB_WORKSPACE
+            if [[ "$TGT" == *"="* ]]; then
+              timeout 600 ghauri -u "$TGT" --batch > output/sql/ghauri.txt 2>&1 || true
             elif [ -s output/crawl/param_urls.txt ]; then
-              echo "Using param_urls.txt"
               head -10 output/crawl/param_urls.txt | while read url; do
-                echo "Testing: $url"
-                cd $HOME/tools/ghauri
-                timeout 120 python3 ghauri.py -u "$url" --batch >> $GITHUB_WORKSPACE/output/sql/ghauri.txt 2>&1 || true
-                cd $GITHUB_WORKSPACE
+                timeout 120 ghauri -u "$url" --batch >> output/sql/ghauri.txt 2>&1 || true
               done
-            else
-              echo "ERROR: Ghauri needs URLs with parameters!"
-              tg " Ghauri: No parameter URLs"
             fi
             tg " Ghauri done"
             ;;
             
           ssrfmap)
-            if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
+            if [[ "$TGT" == *"="* ]]; then
               PARAM=$(echo "$TGT" | grep -oP '\?\K[^=]+' | head -1)
               HOST=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
-              echo "Creating request for $TGT with param $PARAM"
               printf "GET %s HTTP/1.1\nHost: %s\n\n" "$TGT" "$HOST" > /tmp/req.txt
-              cd $HOME/tools/ssrfmap
-              timeout 300 python3 ssrfmap.py -r /tmp/req.txt -p "$PARAM" -m readfiles > $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt 2>&1 || true
+              cd $HOME/tools/ssrfmap && timeout 300 python3 ssrfmap.py -r /tmp/req.txt -p "$PARAM" -m readfiles > $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt 2>&1 || true
               cd $GITHUB_WORKSPACE
-            else
-              echo "ERROR: SSRFMap needs URL with parameter!"
-              tg " SSRFMap: Needs ?param=value URL"
             fi
             tg " SSRFMap done"
             ;;
             
           lfimap)
-            if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
-              echo "Direct param URL: $TGT"
-              cd $HOME/tools/lfimap
-              timeout 600 python3 lfimap.py -U "$TGT" > $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
-              cd $GITHUB_WORKSPACE
+            if [[ "$TGT" == *"="* ]]; then
+              cd $HOME/tools/lfimap && timeout 600 python3 lfimap.py -U "$TGT" > $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
             elif [ -s output/crawl/param_urls.txt ]; then
               head -10 output/crawl/param_urls.txt | while read url; do
-                echo "Testing: $url"
-                cd $HOME/tools/lfimap
-                timeout 120 python3 lfimap.py -U "$url" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
-                cd $GITHUB_WORKSPACE
+                cd $HOME/tools/lfimap && timeout 120 python3 lfimap.py -U "$url" >> $GITHUB_WORKSPACE/output/lfi/lfimap.txt 2>&1 || true
               done
-            else
-              echo "ERROR: LFIMap needs URLs with parameters!"
-              tg " LFIMap: No parameter URLs"
             fi
+            cd $GITHUB_WORKSPACE
             tg " LFIMap done"
             ;;
             
           openredirex)
             if [ -s output/crawl/param_urls.txt ]; then
-              echo "Using param_urls.txt"
-              cat output/crawl/param_urls.txt | python3 $HOME/tools/openredirex/openredirex.py -p "http://evil.com" > output/redirect/openredirex.txt 2>&1 || true
+              cat output/crawl/param_urls.txt | openredirex -p "http://evil.com" > output/redirect/openredirex.txt 2>&1 || true
             elif [[ "$TGT" == *"="* ]]; then
-              echo "$TGT" | python3 $HOME/tools/openredirex/openredirex.py -p "http://evil.com" > output/redirect/openredirex.txt 2>&1 || true
-            else
-              echo "ERROR: OpenRedireX needs URLs with parameters!"
-              tg " OpenRedireX: No parameter URLs"
+              echo "$TGT" | openredirex -p "http://evil.com" > output/redirect/openredirex.txt 2>&1 || true
             fi
             tg " OpenRedireX done"
             ;;
             
           crlfuzz)
-            URL="$TGT"
-            [[ "$URL" != http* ]] && URL="https://$TGT"
-            echo "Running: crlfuzz on $URL"
+            URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
             echo "$URL" | crlfuzz -o output/crlf/crlfuzz.txt
-            COUNT=$(wc -l < output/crlf/crlfuzz.txt 2>/dev/null || echo 0)
-            tg " CRLFuzz: $COUNT findings"
+            tg " CRLFuzz done"
             ;;
             
           commix)
-            if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
-              echo "Direct param URL: $TGT"
+            if [[ "$TGT" == *"="* ]]; then
               timeout 600 commix -u "$TGT" --batch > output/cmdi/commix.txt 2>&1 || true
             elif [ -s output/crawl/param_urls.txt ]; then
               head -10 output/crawl/param_urls.txt | while read url; do
                 timeout 120 commix -u "$url" --batch >> output/cmdi/commix.txt 2>&1 || true
               done
-            else
-              echo "ERROR: Commix needs URLs with parameters!"
-              tg " Commix: No parameter URLs"
             fi
             tg " Commix done"
             ;;
             
           tplmap)
-            if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
-              echo "Direct param URL: $TGT"
-              cd $HOME/tools/tplmap
-              timeout 600 python3 tplmap.py -u "$TGT" > $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
-              cd $GITHUB_WORKSPACE
+            if [[ "$TGT" == *"="* ]]; then
+              cd $HOME/tools/tplmap && timeout 600 python3 tplmap.py -u "$TGT" > $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
             elif [ -s output/crawl/param_urls.txt ]; then
               head -10 output/crawl/param_urls.txt | while read url; do
-                cd $HOME/tools/tplmap
-                timeout 120 python3 tplmap.py -u "$url" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
-                cd $GITHUB_WORKSPACE
+                cd $HOME/tools/tplmap && timeout 120 python3 tplmap.py -u "$url" >> $GITHUB_WORKSPACE/output/ssti/tplmap.txt 2>&1 || true
               done
-            else
-              echo "ERROR: Tplmap needs URLs with parameters!"
-              tg " Tplmap: No parameter URLs"
             fi
+            cd $GITHUB_WORKSPACE
             tg " Tplmap done"
             ;;
             
           subzy)
-            if [ -s output/recon/all_subs.txt ]; then
-              INPUT="output/recon/all_subs.txt"
-            else
-              echo "$TGT" | tr ',' '\n' > targets.txt
-              INPUT="targets.txt"
-            fi
-            echo "Running: subzy on $(wc -l < $INPUT) domains"
+            if [ -s output/recon/all_subs.txt ]; then INPUT="output/recon/all_subs.txt"; else INPUT="targets.txt"; fi
             subzy run --targets "$INPUT" --hide_fails --output output/takeover/subzy.txt
             tg " Subzy done"
             ;;
@@ -547,9 +398,7 @@ jobs:
         esac
         
         echo "=========================================="
-        echo "SCAN COMPLETE"
-        echo "=========================================="
-        echo "=== OUTPUT FILES ==="
+        echo "SCAN COMPLETE - OUTPUT FILES:"
         find output -type f -name "*.txt" -exec wc -l {} \;
         tg " Finished *$T*"
 
