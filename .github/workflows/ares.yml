@@ -25,11 +25,9 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Setup Go
-      uses: actions/setup-go@v4
+    - uses: actions/setup-go@v4
       with:
         go-version: 1.22
 
@@ -39,7 +37,6 @@ jobs:
         echo "TOOL=${{ github.event.inputs.scan_type }}" >> $GITHUB_ENV
         echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
         echo "$HOME/go/bin" >> $GITHUB_PATH
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
         mkdir -p $HOME/go/bin $HOME/tools
         SAFE=$(echo "${{ github.event.inputs.target }}" | sed 's/[^a-zA-Z0-9]/_/g' | cut -c1-40)
         echo "SAFE_TARGET=$SAFE" >> $GITHUB_ENV
@@ -52,39 +49,34 @@ jobs:
         find prev -name "live.txt" -exec cp {} output/probe/ \; 2>/dev/null || true
         find prev -name "param_urls.txt" -exec cp {} output/crawl/ \; 2>/dev/null || true
 
-    - name: Install Deps
+    - name: Install
       run: |
         sudo apt-get update -qq >/dev/null 2>&1
         sudo apt-get install -y -qq python3-pip curl wget git libpcap-dev nikto jq >/dev/null 2>&1
         pip3 install -q google-api-python-client google-auth-httplib2 google-auth-oauthlib
-
-    - name: Install Tool
-      run: |
-        T="$TOOL"
+        T="${{ github.event.inputs.scan_type }}"
         case "$T" in
-          subfinder) go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest >/dev/null 2>&1; go install github.com/tomnomnom/assetfinder@latest >/dev/null 2>&1 ;;
-          amass) go install github.com/owasp-amass/amass/v4/...@latest >/dev/null 2>&1 || true ;;
-          httpx) go install github.com/projectdiscovery/httpx/cmd/httpx@latest >/dev/null 2>&1 ;;
-          naabu) go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest >/dev/null 2>&1 ;;
-          nuclei) go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest >/dev/null 2>&1 ;;
-          dalfox) go install github.com/hahwul/dalfox/v2@latest >/dev/null 2>&1 ;;
-          ffuf) go install github.com/ffuf/ffuf/v2@latest >/dev/null 2>&1; sudo mkdir -p /usr/share/wordlists; wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt ;;
-          feroxbuster) curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash >/dev/null 2>&1; sudo mv feroxbuster /usr/local/bin/ 2>/dev/null; sudo mkdir -p /usr/share/wordlists; wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt ;;
-          crlfuzz) go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest >/dev/null 2>&1 ;;
-          subzy) go install github.com/PentestPad/subzy@latest >/dev/null 2>&1 ;;
-          gowitness) go install github.com/sensepost/gowitness@latest >/dev/null 2>&1 ;;
-          paramspider) git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider >/dev/null 2>&1; cd $HOME/tools/paramspider && pip3 install . -q ;;
-          arjun) pip3 install arjun -q ;;
-          sqlmap) git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap >/dev/null 2>&1 ;;
-          ghauri) git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri >/dev/null 2>&1; cd $HOME/tools/ghauri && pip3 install -r requirements.txt -q ;;
-          xsstrike) git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike >/dev/null 2>&1; cd $HOME/tools/xsstrike && pip3 install -r requirements.txt -q ;;
-          ssrfmap) git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap >/dev/null 2>&1; cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt -q ;;
-          lfimap) git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap >/dev/null 2>&1; cd $HOME/tools/lfimap && pip3 install -r requirements.txt -q ;;
-          openredirex) git clone https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex >/dev/null 2>&1 ;;
-          commix) pip3 install commix -q ;;
-          tplmap) git clone https://github.com/epinna/tplmap $HOME/tools/tplmap >/dev/null 2>&1; cd $HOME/tools/tplmap && pip3 install -r requirements.txt -q 2>/dev/null || true ;;
-          gitleaks) curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz >/dev/null 2>&1; sudo mv gitleaks /usr/local/bin/ ;;
-          nikto) echo "Pre-installed" ;;
+          subfinder) go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest 2>/dev/null; go install github.com/tomnomnom/assetfinder@latest 2>/dev/null ;;
+          amass) go install github.com/owasp-amass/amass/v4/...@latest 2>/dev/null || true ;;
+          httpx) go install github.com/projectdiscovery/httpx/cmd/httpx@latest 2>/dev/null ;;
+          naabu) go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest 2>/dev/null ;;
+          nuclei) go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest 2>/dev/null ;;
+          dalfox) go install github.com/hahwul/dalfox/v2@latest 2>/dev/null ;;
+          ffuf) go install github.com/ffuf/ffuf/v2@latest 2>/dev/null; sudo mkdir -p /usr/share/wordlists; wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt ;;
+          feroxbuster) curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash 2>/dev/null; sudo mv feroxbuster /usr/local/bin/ 2>/dev/null; sudo mkdir -p /usr/share/wordlists; wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -O /usr/share/wordlists/common.txt ;;
+          crlfuzz) go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest 2>/dev/null ;;
+          subzy) go install github.com/PentestPad/subzy@latest 2>/dev/null ;;
+          paramspider) git clone https://github.com/devanshbatham/paramspider $HOME/tools/paramspider 2>/dev/null; cd $HOME/tools/paramspider && pip3 install . -q 2>/dev/null ;;
+          arjun) pip3 install arjun -q 2>/dev/null ;;
+          sqlmap) git clone --depth 1 https://github.com/sqlmapproject/sqlmap $HOME/tools/sqlmap 2>/dev/null ;;
+          ghauri) git clone https://github.com/r0oth3x49/ghauri $HOME/tools/ghauri 2>/dev/null; cd $HOME/tools/ghauri && pip3 install -r requirements.txt -q 2>/dev/null ;;
+          xsstrike) git clone https://github.com/s0md3v/XSStrike $HOME/tools/xsstrike 2>/dev/null; cd $HOME/tools/xsstrike && pip3 install -r requirements.txt -q 2>/dev/null ;;
+          ssrfmap) git clone https://github.com/swisskyrepo/SSRFmap $HOME/tools/ssrfmap 2>/dev/null; cd $HOME/tools/ssrfmap && pip3 install -r requirements.txt -q 2>/dev/null ;;
+          lfimap) git clone https://github.com/hansmach1ne/lfimap $HOME/tools/lfimap 2>/dev/null; cd $HOME/tools/lfimap && pip3 install -r requirements.txt -q 2>/dev/null ;;
+          openredirex) git clone https://github.com/devanshbatham/OpenRedireX $HOME/tools/openredirex 2>/dev/null ;;
+          commix) pip3 install commix -q 2>/dev/null ;;
+          tplmap) git clone https://github.com/epinna/tplmap $HOME/tools/tplmap 2>/dev/null; cd $HOME/tools/tplmap && pip3 install -r requirements.txt -q 2>/dev/null || true ;;
+          gitleaks) curl -sL https://github.com/zricethezav/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz | tar xz 2>/dev/null; sudo mv gitleaks /usr/local/bin/ ;;
         esac
 
     - name: Run
@@ -98,41 +90,10 @@ jobs:
       run: |
         T="$TOOL"
         TGT="$TARGET"
-        STGT="$SAFE_TARGET"
         DOM=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
-        
         echo "$TGT" | tr ',' '\n' > targets.txt
         
         tg() { [ -n "$TELEGRAM_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="Markdown" -d text="$1" >/dev/null 2>&1 || true; }
-        
-        upload_to_drive() {
-          FILE=$1
-          if [ -f "$FILE" ] && [ -s "$FILE" ] && [ -n "$GDRIVE_FOLDER_ID" ]; then
-            python3 << PYEND
-import os
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-try:
-    c=Credentials(None,refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],token_uri="https://oauth2.googleapis.com/token",client_id=os.environ["GOOGLE_CLIENT_ID"],client_secret=os.environ["GOOGLE_CLIENT_SECRET"])
-    s=build("drive","v3",credentials=c)
-    p=os.environ["GDRIVE_FOLDER_ID"]
-    tf="$STGT"
-    tn="$T"
-    q=f"name='{tf}' and '{p}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    r=s.files().list(q=q,fields="files(id)").execute().get("files",[])
-    tid=r[0]["id"] if r else s.files().create(body={"name":tf,"parents":[p],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
-    q=f"name='{tn}' and '{tid}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    r=s.files().list(q=q,fields="files(id)").execute().get("files",[])
-    nid=r[0]["id"] if r else s.files().create(body={"name":tn,"parents":[tid],"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
-    s.files().create(body={"name":"$FILE".split("/")[-1],"parents":[nid]},media_body=MediaFileUpload("$FILE")).execute()
-    print("Uploaded")
-except Exception as e:
-    print(f"Upload error: {e}")
-PYEND
-          fi
-        }
-        
         tg "Started $T on $TGT"
         
         case "$T" in
@@ -141,25 +102,21 @@ PYEND
             assetfinder --subs-only "$DOM" >> output/recon/assetfinder.txt 2>/dev/null || true
             cat output/recon/*.txt 2>/dev/null | sort -u > output/recon/all_subs.txt
             tg "Subfinder: $(wc -l < output/recon/all_subs.txt 2>/dev/null || echo 0) subs"
-            upload_to_drive "output/recon/all_subs.txt"
             ;;
           amass)
             timeout 1800 amass enum -passive -d "$DOM" -o output/recon/amass.txt 2>/dev/null || true
             tg "Amass done"
-            upload_to_drive "output/recon/amass.txt"
             ;;
           httpx)
             if [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt; else echo "$TGT" | tr ',' '\n' > targets.txt; IN=targets.txt; fi
             httpx -l "$IN" -ports 80,443,8080,8443 -threads 50 -silent -o output/probe/httpx.txt 2>/dev/null
-            cat output/probe/httpx.txt 2>/dev/null | cut -d' ' -f1 > output/probe/live.txt
+            cat output/probe/httpx.txt 2>/dev/null | cut -d ' ' -f1 > output/probe/live.txt
             tg "HTTPX: $(wc -l < output/probe/live.txt 2>/dev/null || echo 0) live"
-            upload_to_drive "output/probe/live.txt"
             ;;
           naabu)
             if [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt; else echo "$TGT" | tr ',' '\n' > targets.txt; IN=targets.txt; fi
             naabu -l "$IN" -top-ports 100 -silent -o output/ports/naabu.txt 2>/dev/null
             tg "Naabu done"
-            upload_to_drive "output/ports/naabu.txt"
             ;;
           paramspider)
             if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt
@@ -168,43 +125,37 @@ PYEND
             mkdir -p output/crawl/ps
             cat "$IN" | head -50 | while read line; do
               d=$(echo "$line" | sed 's|https\?://||;s|/.*||')
-              cd $HOME/tools/paramspider && python3 paramspider.py -d "$d" --level high -o $GITHUB_WORKSPACE/output/crawl/ps/${d//[^a-zA-Z0-9]/_}.txt 2>/dev/null || true
+              cd $HOME/tools/paramspider && python3 paramspider.py -d "$d" --level high -o $GITHUB_WORKSPACE/output/crawl/ps/out.txt 2>/dev/null || true
               cd $GITHUB_WORKSPACE
             done
             cat output/crawl/ps/*.txt 2>/dev/null | grep "=" | sort -u > output/crawl/param_urls.txt
             tg "ParamSpider: $(wc -l < output/crawl/param_urls.txt 2>/dev/null || echo 0) URLs"
-            upload_to_drive "output/crawl/param_urls.txt"
             ;;
           arjun)
             if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt; else echo "$TGT" | tr ',' '\n' > targets.txt; IN=targets.txt; fi
-            head -20 "$IN" | while read u; do arjun -u "$u" -oT output/crawl/arjun_tmp.txt 2>/dev/null; cat output/crawl/arjun_tmp.txt >> output/crawl/arjun.txt 2>/dev/null; done
+            head -20 "$IN" | while read u; do arjun -u "$u" -oT output/crawl/arjun.txt 2>/dev/null || true; done
             tg "Arjun done"
-            upload_to_drive "output/crawl/arjun.txt"
             ;;
           nuclei)
             if [ -s output/probe/live.txt ]; then IN=output/probe/live.txt; else echo "$TGT" | tr ',' '\n' > targets.txt; IN=targets.txt; fi
             nuclei -update-templates >/dev/null 2>&1 || true
             nuclei -l "$IN" -severity medium,high,critical -silent -o output/vulns/nuclei.txt 2>/dev/null
             tg "Nuclei: $(wc -l < output/vulns/nuclei.txt 2>/dev/null || echo 0) vulns"
-            upload_to_drive "output/vulns/nuclei.txt"
             ;;
           nikto)
             URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
             timeout 600 nikto -h "$URL" -Tuning 123bde > output/vulns/nikto.txt 2>&1 || true
             tg "Nikto done"
-            upload_to_drive "output/vulns/nikto.txt"
             ;;
           ffuf)
             URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
-            ffuf -u "$URL/FUZZ" -w /usr/share/wordlists/common.txt -mc 200,301,302,403 -s > output/vulns/ffuf.txt 2>/dev/null || true
+            ffuf -u "${URL}/FUZZ" -w /usr/share/wordlists/common.txt -mc 200,301,302,403 -s > output/vulns/ffuf.txt 2>/dev/null || true
             tg "FFUF done"
-            upload_to_drive "output/vulns/ffuf.txt"
             ;;
           feroxbuster)
             URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
             timeout 900 feroxbuster -u "$URL" -w /usr/share/wordlists/common.txt --silent > output/vulns/feroxbuster.txt 2>/dev/null || true
             tg "Feroxbuster done"
-            upload_to_drive "output/vulns/feroxbuster.txt"
             ;;
           dalfox)
             if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
@@ -213,7 +164,6 @@ PYEND
               dalfox file output/crawl/param_urls.txt --silence -o output/xss/dalfox.txt 2>/dev/null
             fi
             tg "Dalfox done"
-            upload_to_drive "output/xss/dalfox.txt"
             ;;
           xsstrike)
             if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
@@ -223,7 +173,6 @@ PYEND
             fi
             cd $GITHUB_WORKSPACE
             tg "XSStrike done"
-            upload_to_drive "output/xss/xsstrike.txt"
             ;;
           sqlmap)
             if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
@@ -232,7 +181,6 @@ PYEND
               head -15 output/crawl/param_urls.txt | while read u; do timeout 180 python3 $HOME/tools/sqlmap/sqlmap.py -u "$u" --batch --risk 2 --level 2 >> output/sql/sqlmap.txt 2>/dev/null || true; done
             fi
             tg "SQLMap done"
-            upload_to_drive "output/sql/sqlmap.txt"
             ;;
           ghauri)
             if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
@@ -242,18 +190,16 @@ PYEND
             fi
             cd $GITHUB_WORKSPACE
             tg "Ghauri done"
-            upload_to_drive "output/sql/ghauri.txt"
             ;;
           ssrfmap)
             if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
               PNAME=$(echo "$TGT" | grep -oP '\?\K[^=]+' | head -1)
               HOST=$(echo "$TGT" | sed 's|https\?://||;s|/.*||')
-              echo -e "GET $TGT HTTP/1.1\nHost: $HOST\n" > /tmp/req.txt
+              printf "GET %s HTTP/1.1\nHost: %s\n\n" "$TGT" "$HOST" > /tmp/req.txt
               cd $HOME/tools/ssrfmap && timeout 300 python3 ssrfmap.py -r /tmp/req.txt -p "$PNAME" -m readfiles > $GITHUB_WORKSPACE/output/ssrf/ssrfmap.txt 2>/dev/null || true
               cd $GITHUB_WORKSPACE
             fi
             tg "SSRFMap done"
-            upload_to_drive "output/ssrf/ssrfmap.txt"
             ;;
           lfimap)
             if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
@@ -263,7 +209,6 @@ PYEND
             fi
             cd $GITHUB_WORKSPACE
             tg "LFIMap done"
-            upload_to_drive "output/lfi/lfimap.txt"
             ;;
           openredirex)
             if [ -s output/crawl/param_urls.txt ]; then
@@ -272,13 +217,11 @@ PYEND
               echo "$TGT" | python3 $HOME/tools/openredirex/openredirex.py -p "http://evil.com" > output/redirect/openredirex.txt 2>/dev/null || true
             fi
             tg "OpenRedireX done"
-            upload_to_drive "output/redirect/openredirex.txt"
             ;;
           crlfuzz)
             URL="$TGT"; [[ "$URL" != http* ]] && URL="https://$TGT"
             echo "$URL" | crlfuzz -silent -o output/crlf/crlfuzz.txt 2>/dev/null || true
             tg "CRLFuzz done"
-            upload_to_drive "output/crlf/crlfuzz.txt"
             ;;
           commix)
             if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
@@ -287,7 +230,6 @@ PYEND
               head -10 output/crawl/param_urls.txt | while read u; do timeout 120 commix -u "$u" --batch >> output/cmdi/commix.txt 2>/dev/null || true; done
             fi
             tg "Commix done"
-            upload_to_drive "output/cmdi/commix.txt"
             ;;
           tplmap)
             if [[ "$TGT" == *"="* ]] || [[ "$TGT" == *"?"* ]]; then
@@ -297,18 +239,15 @@ PYEND
             fi
             cd $GITHUB_WORKSPACE
             tg "Tplmap done"
-            upload_to_drive "output/ssti/tplmap.txt"
             ;;
           subzy)
             if [ -s output/recon/all_subs.txt ]; then IN=output/recon/all_subs.txt; else echo "$TGT" | tr ',' '\n' > targets.txt; IN=targets.txt; fi
             subzy run --targets "$IN" --hide_fails --output output/takeover/subzy.txt 2>/dev/null || true
             tg "Subzy done"
-            upload_to_drive "output/takeover/subzy.txt"
             ;;
           gitleaks)
             gitleaks detect --no-git -v > output/secrets/gitleaks.txt 2>/dev/null || true
             tg "Gitleaks done"
-            upload_to_drive "output/secrets/gitleaks.txt"
             ;;
           *)
             tg "Unknown: $T"
@@ -316,10 +255,44 @@ PYEND
         esac
         tg "Finished $T"
 
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+    - name: Upload to Drive
+      if: always()
+      env:
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+        GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+      run: |
+        if [ -n "$GDRIVE_FOLDER_ID" ]; then
+          python3 -c "
+import os,glob
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+try:
+    c=Credentials(None,refresh_token=os.environ['GOOGLE_REFRESH_TOKEN'],token_uri='https://oauth2.googleapis.com/token',client_id=os.environ['GOOGLE_CLIENT_ID'],client_secret=os.environ['GOOGLE_CLIENT_SECRET'])
+    s=build('drive','v3',credentials=c)
+    p=os.environ['GDRIVE_FOLDER_ID']
+    tf='$SAFE_TARGET'
+    tn='$TOOL'
+    q=f\"name='{tf}' and '{p}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false\"
+    r=s.files().list(q=q,fields='files(id)').execute().get('files',[])
+    tid=r[0]['id'] if r else s.files().create(body={'name':tf,'parents':[p],'mimeType':'application/vnd.google-apps.folder'}).execute()['id']
+    q=f\"name='{tn}' and '{tid}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false\"
+    r=s.files().list(q=q,fields='files(id)').execute().get('files',[])
+    nid=r[0]['id'] if r else s.files().create(body={'name':tn,'parents':[tid],'mimeType':'application/vnd.google-apps.folder'}).execute()['id']
+    for f in glob.glob('output/**/*.txt',recursive=True):
+        if os.path.getsize(f)>0:
+            s.files().create(body={'name':os.path.basename(f),'parents':[nid]},media_body=MediaFileUpload(f)).execute()
+            print(f'Uploaded {f}')
+except Exception as e:
+    print(f'Error: {e}')
+"
+        fi
+
+    - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: ${{ env.TOOL }}-${{ github.run_id }}
+        name: ${{ github.event.inputs.scan_type }}-${{ github.run_id }}
         path: output/
         retention-days: 90
